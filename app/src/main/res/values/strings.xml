@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Dual_Camera_Video_Mock</string>
-    <string name="take_picture">TAKE PICTURE</string>
+    <string name="take_picture">TAKE VIDEO</string>
+    <string name="stop_video">STOP VIDEO</string>
 </resources>

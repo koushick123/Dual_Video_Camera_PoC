@@ -3,7 +3,6 @@ package com.dual_camera_video_mock;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -12,12 +11,9 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
-import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.media.Image;
-import android.media.ImageReader;
+import android.media.MediaRecorder;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.NonNull;
@@ -32,19 +28,14 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
-    private Button takePictureButton;
     private TextureView textureView;
+    Button takeVideoBtn;
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
     static {
         ORIENTATIONS.append(Surface.ROTATION_0, 90);
@@ -58,12 +49,23 @@ public class MainActivity extends AppCompatActivity {
     protected CaptureRequest captureRequest;
     protected CaptureRequest.Builder captureRequestBuilder;
     private Size imageDimension;
-    private ImageReader imageReader;
-    private File file;
+    //private ImageReader imageReader;
+    //private File file;
     private static final int REQUEST_CAMERA_PERMISSION = 200;
-    private boolean mFlashSupported;
+    public static final int RECORD_AUDIO = 0;
+    //private boolean mFlashSupported;
     private Handler mBackgroundHandler;
     private HandlerThread mBackgroundThread;
+    MediaRecorder mediaRecorder;
+    String mNextVideoAbsolutePath;
+    private Size mVideoSize;
+    private boolean mIsRecordingVideo;
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -71,12 +73,17 @@ public class MainActivity extends AppCompatActivity {
         textureView = (TextureView) findViewById(R.id.texture);
         assert textureView != null;
         textureView.setSurfaceTextureListener(textureListener);
-        takePictureButton = (Button) findViewById(R.id.btn_takepicture);
-        assert takePictureButton != null;
-        takePictureButton.setOnClickListener(new View.OnClickListener() {
+        takeVideoBtn = (Button)findViewById(R.id.btn_takevideo);
+        assert takeVideoBtn != null;
+        takeVideoBtn.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onClick(View v) {
-                takePicture();
+            public void onClick(View view) {
+                if(!mIsRecordingVideo) {
+                    startRecordingVideo();
+                }
+                else{
+                    stopRecordingVideo();
+                }
             }
         });
     }
@@ -92,6 +99,7 @@ public class MainActivity extends AppCompatActivity {
         }
         @Override
         public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+            closeCamera();
             return false;
         }
         @Override
@@ -116,14 +124,15 @@ public class MainActivity extends AppCompatActivity {
             cameraDevice = null;
         }
     };
-    final CameraCaptureSession.CaptureCallback captureCallbackListener = new CameraCaptureSession.CaptureCallback() {
+    /*final CameraCaptureSession.CaptureCallback captureCallbackListener = new CameraCaptureSession.CaptureCallback() {
         @Override
         public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
             super.onCaptureCompleted(session, request, result);
             Toast.makeText(MainActivity.this, "Saved:" + file, Toast.LENGTH_SHORT).show();
             createCameraPreview();
         }
-    };
+    };*/
+
     protected void startBackgroundThread() {
         mBackgroundThread = new HandlerThread("Camera Background");
         mBackgroundThread.start();
@@ -139,7 +148,110 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
     }
-    protected void takePicture() {
+
+    private void stopRecordingVideo() {
+        // UI
+        mIsRecordingVideo = false;
+        takeVideoBtn.setText(R.string.take_picture);
+        // Stop recording
+        mediaRecorder.stop();
+        mediaRecorder.reset();
+
+        Toast.makeText(getApplicationContext(), "Video saved: " + mNextVideoAbsolutePath,
+                Toast.LENGTH_SHORT).show();
+        Log.d(TAG, "Video saved: " + mNextVideoAbsolutePath);
+
+        mNextVideoAbsolutePath = null;
+        createCameraPreview();
+    }
+
+    private void startRecordingVideo() {
+        closePreviewSessions();
+        try {
+            setUpMediaRecorder();
+            SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
+            assert surfaceTexture!=null;
+            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+            List<Surface> surfaces = new ArrayList<>();
+
+            Surface previewSurface = new Surface(surfaceTexture);
+            surfaces.add(previewSurface);
+            captureRequestBuilder.addTarget(previewSurface);
+
+            mediaRecorder.prepare();
+            Surface recorderSurface = mediaRecorder.getSurface();
+            surfaces.add(recorderSurface);
+            captureRequestBuilder.addTarget(recorderSurface);
+
+            cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
+                @Override
+                public void onConfigured(CameraCaptureSession cameraCaptureSession) {
+                    cameraCaptureSessions = cameraCaptureSession;
+                    updatePreview();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            // UI
+                            takeVideoBtn.setText(R.string.stop_video);
+                            mIsRecordingVideo = true;
+
+                            // Start recording
+                            mediaRecorder.start();
+                        }
+                    });
+                }
+
+                @Override
+                public void onConfigureFailed(CameraCaptureSession cameraCaptureSession) {
+                    Toast.makeText(getApplicationContext(), "Failed", Toast.LENGTH_SHORT).show();
+                }
+            }, mBackgroundHandler);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    private void setUpMediaRecorder() throws IOException {
+
+        if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO);
+            return;
+        }
+        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+        mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+        mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+        if (mNextVideoAbsolutePath == null || mNextVideoAbsolutePath.isEmpty()) {
+            mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
+        }
+        mediaRecorder.setOutputFile(mNextVideoAbsolutePath);
+        mediaRecorder.setVideoEncodingBitRate(10000000);
+        mediaRecorder.setVideoFrameRate(30);
+        mediaRecorder.setVideoSize(mVideoSize.getWidth(), mVideoSize.getHeight());
+        mediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+        mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        mediaRecorder.setOrientationHint(ORIENTATIONS.get(rotation));
+    }
+
+    private String getVideoFilePath(Context context) {
+        return context.getExternalFilesDir(null).getAbsolutePath() + "/"
+                + System.currentTimeMillis() + ".mp4";
+    }
+
+    private static Size chooseVideoSize(Size[] choices) {
+        for (Size size : choices) {
+            if (size.getWidth() == size.getHeight() * 4 / 3 && size.getWidth() <= 1080) {
+                return size;
+            }
+        }
+        Log.e(TAG, "Couldn't find any suitable video size");
+        return choices[choices.length - 1];
+    }
+
+    /*protected void takePicture() {
         if(null == cameraDevice) {
             Log.e(TAG, "cameraDevice is null");
             return;
@@ -158,7 +270,7 @@ public class MainActivity extends AppCompatActivity {
                 height = jpegSizes[0].getHeight();
             }
             ImageReader reader = ImageReader.newInstance(width, height, ImageFormat.JPEG, 1);
-            List<Surface> outputSurfaces = new ArrayList<Surface>(2);
+            List<Surface> outputSurfaces = new ArrayList<>(2);
             outputSurfaces.add(reader.getSurface());
             outputSurfaces.add(new Surface(textureView.getSurfaceTexture()));
             final CaptureRequest.Builder captureBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
@@ -225,16 +337,29 @@ public class MainActivity extends AppCompatActivity {
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }*/
+
+    private void closePreviewSessions()
+    {
+        if(cameraCaptureSessions!=null) {
+            cameraCaptureSessions.close();
+        }
+        cameraCaptureSessions=null;
+        Log.d(MainActivity.this.getClass().getName(),"CLOSE Camera capture session == "+cameraCaptureSessions);
     }
+
     protected void createCameraPreview() {
         try {
+            closePreviewSessions();
             SurfaceTexture texture = textureView.getSurfaceTexture();
             assert texture != null;
             texture.setDefaultBufferSize(imageDimension.getWidth(), imageDimension.getHeight());
-            Surface surface = new Surface(texture);
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            captureRequestBuilder.addTarget(surface);
-            cameraDevice.createCaptureSession(Arrays.asList(surface), new CameraCaptureSession.StateCallback(){
+
+            Surface videoSurface = new Surface(texture);
+            captureRequestBuilder.addTarget(videoSurface);
+
+            cameraDevice.createCaptureSession(Arrays.asList(videoSurface), new CameraCaptureSession.StateCallback(){
                 @Override
                 public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
                     //The camera is already closed
@@ -243,17 +368,19 @@ public class MainActivity extends AppCompatActivity {
                     }
                     // When the session is ready, we start displaying the preview.
                     cameraCaptureSessions = cameraCaptureSession;
+                    Log.d(MainActivity.this.getClass().getName(),"Camera capture session == "+cameraCaptureSession);
                     updatePreview();
                 }
                 @Override
                 public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
                     Toast.makeText(MainActivity.this, "Configuration change", Toast.LENGTH_SHORT).show();
                 }
-            }, null);
+            }, mBackgroundHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
+
     private void openCamera() {
         CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
         Log.e(TAG, "is camera open");
@@ -264,10 +391,14 @@ public class MainActivity extends AppCompatActivity {
             assert map != null;
             imageDimension = map.getOutputSizes(SurfaceTexture.class)[0];
             // Add permission for camera and let user grant the permission
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_CAMERA_PERMISSION);
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+                    && ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.CAMERA,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_CAMERA_PERMISSION);
                 return;
             }
+            mVideoSize = chooseVideoSize(map.getOutputSizes(MediaRecorder.class));
+            mediaRecorder = new MediaRecorder();
             manager.openCamera(cameraId, stateCallback, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
@@ -280,21 +411,27 @@ public class MainActivity extends AppCompatActivity {
         }
         captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
         try {
+            HandlerThread thread = new HandlerThread("CameraPreview");
+            thread.start();
+            Log.d(MainActivity.this.getClass().getName(),"Camera session "+cameraCaptureSessions);
             cameraCaptureSessions.setRepeatingRequest(captureRequestBuilder.build(), null, mBackgroundHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
     private void closeCamera() {
+        closePreviewSessions();
+
         if (null != cameraDevice) {
             cameraDevice.close();
             cameraDevice = null;
         }
-        if (null != imageReader) {
-            imageReader.close();
-            imageReader = null;
+        if (null != mediaRecorder) {
+            mediaRecorder.release();
+            mediaRecorder = null;
         }
     }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         if (requestCode == REQUEST_CAMERA_PERMISSION) {
@@ -319,7 +456,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         Log.e(TAG, "onPause");
-        //closeCamera();
+        closeCamera();
         stopBackgroundThread();
         super.onPause();
     }
