@@ -24,4 +24,13 @@
         android:layout_marginBottom="16dp"
         android:layout_marginTop="16dp"
         android:text="@string/take_picture" />
+
+    <Button
+        android:id="@+id/switchBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:layout_alignLeft="@+id/btn_takevideo"
+        android:text="@string/switch_button"
+        android:layout_marginTop="16dp"/>
 </RelativeLayout>
