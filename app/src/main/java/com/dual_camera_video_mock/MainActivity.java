@@ -12,6 +12,7 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.MediaMetadataRetriever;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
@@ -62,10 +63,16 @@ public class MainActivity extends AppCompatActivity {
     private boolean mIsRecordingVideo;
     private Button switchBtn;
     private boolean BACK_CAMERA = true;
+    private String LOG_TAG = MainActivity.class.getName();
+    private int cameraOrientation;
 
     @Override
     protected void onStop() {
+        Log.e(TAG, "onPause");
         super.onStop();
+        if(mediaRecorder!=null){
+            mediaRecorder.release();
+        }
     }
 
     @Override
@@ -92,16 +99,11 @@ public class MainActivity extends AppCompatActivity {
         switchBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if(!mIsRecordingVideo){
-                    Toast.makeText(MainActivity.this, "Please start video recording", Toast.LENGTH_SHORT).show();
+                if(BACK_CAMERA) {
+                    openCamera(false);
                 }
                 else{
-                    if(BACK_CAMERA) {
-                        openCamera(false);
-                    }
-                    else{
-                        openCamera(true);
-                    }
+                    openCamera(true);
                 }
             }
         });
@@ -129,10 +131,12 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onOpened(CameraDevice camera) {
             //This is called when the camera is open
-            Log.e(TAG, "onOpened");
+            Log.e(TAG, "onOpened == "+cameraOrientation);
             cameraDevice = camera;
-            createCameraPreview();
-            if(mIsRecordingVideo) {
+            if(!mIsRecordingVideo) {
+                createCameraPreview();
+            }
+            else{
                 startRecordingVideo();
             }
         }
@@ -142,6 +146,7 @@ public class MainActivity extends AppCompatActivity {
         }
         @Override
         public void onError(CameraDevice camera, int error) {
+            Log.d(LOG_TAG,"Error encountered");
             cameraDevice.close();
             cameraDevice = null;
         }
@@ -172,17 +177,32 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void stopRecordingVideo() {
+
+        if(cameraCaptureSessions!=null) {
+            try {
+                cameraCaptureSessions.abortCaptures();
+            } catch (CameraAccessException e) {
+                e.printStackTrace();
+            }
+        }
+        cameraCaptureSessions=null;
+
         // UI
         mIsRecordingVideo = false;
         takeVideoBtn.setText(R.string.take_picture);
         // Stop recording
         mediaRecorder.stop();
         mediaRecorder.reset();
+        mediaRecorder=null;
 
         Toast.makeText(getApplicationContext(), "Video saved: " + mNextVideoAbsolutePath,
                 Toast.LENGTH_SHORT).show();
         Log.d(TAG, "Video saved: " + mNextVideoAbsolutePath);
 
+        MediaMetadataRetriever m = new MediaMetadataRetriever();
+        m.setDataSource(mNextVideoAbsolutePath);
+        String s = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+        Log.d("Video ROTATION == ", s);
         mNextVideoAbsolutePath = null;
         createCameraPreview();
     }
@@ -246,7 +266,7 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO);
             return;
         }
-        if(!mIsRecordingVideo) {
+        if(!mIsRecordingVideo){
             mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
             mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
             mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
@@ -413,27 +433,30 @@ public class MainActivity extends AppCompatActivity {
         CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
         Log.e(TAG, "is camera open");
         try {
+            closeCamera();
             if(backCam) {
-                if(mIsRecordingVideo) {
-                    closeCamera();
-                    cameraId = manager.getCameraIdList()[0];
-                    BACK_CAMERA = true;
-                }
-                else{
-                    cameraId = manager.getCameraIdList()[0];
-                }
+                cameraId = manager.getCameraIdList()[0];
+                BACK_CAMERA = true;
             }
             else{
-                if(mIsRecordingVideo){
-                    closeCamera();
-                    cameraId = manager.getCameraIdList()[1];
-                    BACK_CAMERA=false;
-                }
-                else{
-                    cameraId = manager.getCameraIdList()[1];
-                }
+                cameraId = manager.getCameraIdList()[1];
+                BACK_CAMERA=false;
             }
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
+            cameraOrientation = characteristics.get(CameraCharacteristics.LENS_FACING).intValue();
+            int level=characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
+            switch(level)
+            {
+                case CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL:
+                    Log.d(LOG_TAG,"Full support");
+                    break;
+                case CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY:
+                    Log.d(LOG_TAG,"Legacy support");
+                    break;
+                case CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED:
+                    Log.d(LOG_TAG,"Limited support");
+                    break;
+            }
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             assert map != null;
             imageDimension = map.getOutputSizes(SurfaceTexture.class)[0];
@@ -475,10 +498,6 @@ public class MainActivity extends AppCompatActivity {
             cameraDevice.close();
             cameraDevice = null;
         }
-        /*if (null != mediaRecorder) {
-            mediaRecorder.release();
-            mediaRecorder = null;
-        }*/
     }
 
     @Override
@@ -504,9 +523,9 @@ public class MainActivity extends AppCompatActivity {
     }
     @Override
     protected void onPause() {
+        super.onPause();
         Log.e(TAG, "onPause");
         closeCamera();
         stopBackgroundThread();
-        super.onPause();
     }
 }
