@@ -12,7 +12,6 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.media.MediaMetadataRetriever;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
@@ -68,7 +67,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onStop() {
-        Log.e(TAG, "onPause");
+        Log.e(TAG, "onStop");
         super.onStop();
         if(mediaRecorder!=null){
             mediaRecorder.release();
@@ -108,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+
     TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
@@ -198,11 +198,6 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(getApplicationContext(), "Video saved: " + mNextVideoAbsolutePath,
                 Toast.LENGTH_SHORT).show();
         Log.d(TAG, "Video saved: " + mNextVideoAbsolutePath);
-
-        MediaMetadataRetriever m = new MediaMetadataRetriever();
-        m.setDataSource(mNextVideoAbsolutePath);
-        String s = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
-        Log.d("Video ROTATION == ", s);
         mNextVideoAbsolutePath = null;
         createCameraPreview();
     }
