@@ -31,6 +31,8 @@ public class Main2Activity extends AppCompatActivity {
     static int currentCameraId;
     static boolean mIsRecording=false;
     String mNextVideoAbsolutePath;
+    FrameLayout preview;
+    private SurfaceHolder mHolder;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,7 +41,9 @@ public class Main2Activity extends AppCompatActivity {
         if(checkCameraHardware(getApplicationContext())) {
             // Create an instance of Camera
             //Open the back camera first
-            mCamera = getCameraInstance(true);
+            if(mCamera == null) {
+                mCamera = getCameraInstance(true);
+            }
             if(mCamera!=null){
                 Log.d(LOG_TAG,"Cameras == "+Camera.getNumberOfCameras());
             }
@@ -47,7 +51,7 @@ public class Main2Activity extends AppCompatActivity {
 
         // Create our Preview view and set it as the content of our activity.
         mPreview = new CameraPreview(this, mCamera);
-        FrameLayout preview = (FrameLayout) findViewById(R.id.camera_preview);
+        preview = (FrameLayout) findViewById(R.id.camera_preview);
         preview.addView(mPreview);
         videoBtn = (Button)findViewById(R.id.button_capture);
         mMediaRecorder = new MediaRecorder();
@@ -67,15 +71,21 @@ public class Main2Activity extends AppCompatActivity {
         switch_btn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
+                mCamera.stopPreview();
                 releaseCamera();
                 if(BACK_CAM){
                     mCamera = getCameraInstance(false);
+                    Log.d(LOG_TAG,"switched to front camera == "+mCamera);
                 }
                 else{
                     mCamera = getCameraInstance(true);
+                    Log.d(LOG_TAG,"switched to back camera == "+mCamera);
                 }
                 if(mIsRecording){
-                   startRecording();
+                    startRecording();
+                }
+                else{
+                    createPreview();
                 }
             }
         });
@@ -147,18 +157,20 @@ public class Main2Activity extends AppCompatActivity {
         if (mNextVideoAbsolutePath == null || mNextVideoAbsolutePath.isEmpty()) {
             mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
         }
-        mMediaRecorder.setProfile(CamcorderProfile.get(currentCameraId,CamcorderProfile.QUALITY_480P));
+        mMediaRecorder.setProfile(CamcorderProfile.get(currentCameraId,CamcorderProfile.QUALITY_HIGH));
         mMediaRecorder.setOutputFile(mNextVideoAbsolutePath);
         mMediaRecorder.setPreviewDisplay(mPreview.getHolder().getSurface());
-        try {
-            mMediaRecorder.prepare();
-            mMediaRecorder.start();
-            videoBtn.setText("STOP VIDEO");
-            mIsRecording=true;
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
 
+        if(!mIsRecording) {
+            try {
+                mMediaRecorder.prepare();
+                mMediaRecorder.start();
+                videoBtn.setText("STOP VIDEO");
+                mIsRecording = true;
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private String getVideoFilePath(Context context) {
@@ -170,7 +182,6 @@ public class Main2Activity extends AppCompatActivity {
     {
         videoBtn.setText("Take Video");
         mMediaRecorder.stop();
-        mMediaRecorder.release();
         mIsRecording=false;
         if(Build.VERSION.SDK_INT <= Build.VERSION_CODES.ICE_CREAM_SANDWICH){
             mCamera.lock();
@@ -184,6 +195,7 @@ public class Main2Activity extends AppCompatActivity {
         if (mCamera != null){
             mCamera.release();        // release the camera for other applications
             mCamera = null;
+            Log.d(LOG_TAG,"Camera released...");
         }
     }
 
@@ -198,7 +210,7 @@ public class Main2Activity extends AppCompatActivity {
     @Override
     protected void onResume(){
         super.onResume();
-        Log.d(LOG_TAG,"onResume... "+mCamera);
+        Log.d(LOG_TAG,"onResume... "+mCamera+", BACK_CAM == "+BACK_CAM);
         if(mCamera == null) {
             if (BACK_CAM) {
                 mCamera = getCameraInstance(true);
@@ -214,14 +226,11 @@ public class Main2Activity extends AppCompatActivity {
             mMediaRecorder.release(); // release the recorder object
             mMediaRecorder = null;
             mCamera.lock();           // lock camera for later use
+            Log.d(LOG_TAG,"media recorder released....");
         }
     }
 
-
     class CameraPreview extends SurfaceView implements SurfaceHolder.Callback {
-
-        private SurfaceHolder mHolder;
-        String TAG = CameraPreview.this.getClass().getName();
 
         public CameraPreview(Context context, Camera camera) {
             super(context);
@@ -231,24 +240,12 @@ public class Main2Activity extends AppCompatActivity {
             // underlying surface is created and destroyed.
             mHolder = getHolder();
             mHolder.addCallback(this);
-            // deprecated setting, but required on Android versions prior to 3.0
-            mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         }
 
         public void surfaceCreated(SurfaceHolder holder) {
             // The Surface has been created, now tell the camera where to draw the preview.
-            if(mCamera!=null) {
-                try {
-                    mCamera.setPreviewDisplay(holder);
-                    mCamera.startPreview();
-                    if (BACK_CAM) {
-                        setCameraDisplayOrientation(Main2Activity.this, getBackCameraId(), mCamera);
-                    } else {
-                        setCameraDisplayOrientation(Main2Activity.this, getFrontCameraId(), mCamera);
-                    }
-                } catch (IOException e) {
-                    Log.d(TAG, "Error setting camera preview: " + e.getMessage());
-                }
+            if (mCamera != null) {
+                createPreview();
             }
         }
 
@@ -260,7 +257,7 @@ public class Main2Activity extends AppCompatActivity {
             // If your preview can change or rotate, take care of those events here.
             // Make sure to stop the preview before resizing or reformatting it.
 
-            if (mHolder.getSurface() == null){
+            if (mHolder.getSurface() == null) {
                 // preview surface does not exist
                 return;
             }
@@ -268,51 +265,54 @@ public class Main2Activity extends AppCompatActivity {
             // stop preview before making changes
             try {
                 mCamera.stopPreview();
-            } catch (Exception e){
+            } catch (Exception e) {
                 // ignore: tried to stop a non-existent preview
             }
 
             // set preview size and make any resize, rotate or
             // reformatting changes here
-            if(BACK_CAM) {
-                setCameraDisplayOrientation(Main2Activity.this, getBackCameraId(),mCamera);
-            }
-            else{
-                setCameraDisplayOrientation(Main2Activity.this, getFrontCameraId(),mCamera);
-            }
-            // start preview with new settings
-            try {
-                mCamera.setPreviewDisplay(mHolder);
-                mCamera.startPreview();
+            createPreview();
+        }
+    }
 
-            } catch (Exception e){
-                Log.d(TAG, "Error starting camera preview: " + e.getMessage());
-            }
+    private void setCameraDisplayOrientation(Activity activity,
+                                                    int cameraId, android.hardware.Camera camera) {
+        android.hardware.Camera.CameraInfo info =
+                new android.hardware.Camera.CameraInfo();
+        android.hardware.Camera.getCameraInfo(cameraId, info);
+        int rotation = activity.getWindowManager().getDefaultDisplay()
+                .getRotation();
+        int degrees = 0;
+        switch (rotation) {
+            case Surface.ROTATION_0: degrees = 0; break;
+            case Surface.ROTATION_90: degrees = 90; break;
+            case Surface.ROTATION_180: degrees = 180; break;
+            case Surface.ROTATION_270: degrees = 270; break;
         }
 
-        private void setCameraDisplayOrientation(Activity activity,
-                                                        int cameraId, android.hardware.Camera camera) {
-            android.hardware.Camera.CameraInfo info =
-                    new android.hardware.Camera.CameraInfo();
-            android.hardware.Camera.getCameraInfo(cameraId, info);
-            int rotation = activity.getWindowManager().getDefaultDisplay()
-                    .getRotation();
-            int degrees = 0;
-            switch (rotation) {
-                case Surface.ROTATION_0: degrees = 0; break;
-                case Surface.ROTATION_90: degrees = 90; break;
-                case Surface.ROTATION_180: degrees = 180; break;
-                case Surface.ROTATION_270: degrees = 270; break;
-            }
-
-            int result;
-            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-                result = (info.orientation + degrees) % 360;
-                result = (360 - result) % 360;  // compensate the mirror
-            } else {  // back-facing
-                result = (info.orientation - degrees + 360) % 360;
-            }
-            camera.setDisplayOrientation(result);
+        int result;
+        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            result = (info.orientation + degrees) % 360;
+            result = (360 - result) % 360;  // compensate the mirror
+        } else {  // back-facing
+            result = (info.orientation - degrees + 360) % 360;
         }
+        camera.setDisplayOrientation(result);
+    }
+
+    private void createPreview()
+    {
+        if (BACK_CAM) {
+            setCameraDisplayOrientation(Main2Activity.this, getBackCameraId(), mCamera);
+        } else {
+            setCameraDisplayOrientation(Main2Activity.this, getFrontCameraId(), mCamera);
+        }
+        try {
+            mCamera.setPreviewDisplay(mHolder);
+        } catch (IOException e) {
+            Log.e(LOG_TAG,"Unable to recreate preview");
+            e.printStackTrace();
+        }
+        mCamera.startPreview();
     }
 }
