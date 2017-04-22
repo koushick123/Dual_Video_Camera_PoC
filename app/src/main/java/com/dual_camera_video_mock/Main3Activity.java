@@ -30,7 +30,7 @@ import java.nio.FloatBuffer;
 public class Main3Activity extends AppCompatActivity {
 
     private static final String TAG = "Main3Activity";
-    private static final boolean VERBOSE = false;           // lots of logging
+    private static final boolean VERBOSE = true;           // lots of logging
 
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
     private static final File OUTPUT_DIR = Environment.getExternalStorageDirectory();

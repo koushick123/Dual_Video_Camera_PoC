@@ -35,14 +35,15 @@
             </intent-filter>
         </activity>
         -->
-        <!--<activity android:name=".Main3Activity">
-            <intent-filter>
+        <activity android:name=".Main3Activity">
+            <!--<intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>-->
+            </intent-filter>-->
+        </activity>
         <activity android:name=".ContinuousCaptureActivity">
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

@@ -12,7 +12,6 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.widget.Button;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
@@ -57,6 +56,8 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
 
     private MainHandler mHandler;
     private float mSecondsOfVideo;
+    Button btn;
+    private boolean mRecordinProgress=false;
 
     /**
      * Custom message handler for main UI thread.
@@ -99,7 +100,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             }
 
             switch (msg.what) {
-                case MSG_BLINK_TEXT: {
+                /*case MSG_BLINK_TEXT: {
                     TextView tv = (TextView) activity.findViewById(R.id.recording_text);
 
                     // Attempting to make it blink by using setEnabled() doesn't work --
@@ -115,7 +116,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
                     int delay = (visibility == View.VISIBLE) ? 1000 : 200;
                     sendEmptyMessageDelayed(MSG_BLINK_TEXT, delay);
                     break;
-                }
+                }*/
                 case MSG_FRAME_AVAILABLE: {
                     activity.drawFrame();
                     break;
@@ -146,12 +147,26 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         sh.addCallback(this);
 
         mHandler = new MainHandler(this);
-        mHandler.sendEmptyMessageDelayed(MainHandler.MSG_BLINK_TEXT, 1500);
 
         mOutputFile = new File(getExternalFilesDir(null), "continuous-capture.mp4");
         Log.d(TAG,"Saving file at == "+getExternalFilesDir(null).getPath());
         mSecondsOfVideo = 0.0f;
-        updateControls();
+        btn = (Button)findViewById(R.id.capture_button);
+        btn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if(!mRecordinProgress)
+                {
+                    startRecording();
+                }
+                else
+                {
+                    stopRecording();
+                }
+            }
+        });
+
+        //updateControls();
     }
 
     @Override
@@ -260,10 +275,6 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
      * Updates the current state of the controls.
      */
     private void updateControls() {
-        String str = getString(R.string.secondsOfVideo, mSecondsOfVideo);
-        TextView tv = (TextView) findViewById(R.id.capturedVideoDesc_text);
-        tv.setText(str);
-
         boolean wantEnabled = (mCircEncoder != null) && !mFileSaveInProgress;
         Button button = (Button) findViewById(R.id.capture_button);
         if (button.isEnabled() != wantEnabled) {
@@ -285,15 +296,41 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         // The button is disabled in onCreate(), and not enabled until the encoder and output
         // surface is ready, so it shouldn't be possible to get here with a null mCircEncoder.
         mFileSaveInProgress = true;
-        updateControls();
-        TextView tv = (TextView) findViewById(R.id.recording_text);
-        String str = getString(R.string.nowSaving);
-        tv.setText(str);
+        //updateControls();
 
+    }
 
+    private void startRecording()
+    {
+        btn.setText("STOP RECORD");
+        mRecordinProgress=true;
+        try {
+            mCircEncoder = new CircularEncoder(VIDEO_WIDTH, VIDEO_HEIGHT, 6000000,
+                    mCameraPreviewThousandFps / 1000, 7, mHandler);
+        } catch (IOException ioe) {
+            throw new RuntimeException(ioe);
+        }
+        mEncoderSurface = new WindowSurface(mEglCore, mCircEncoder.getInputSurface(), true);
+    }
+
+    private void stopRecording()
+    {
+        btn.setText("START RECORD");
+        mRecordinProgress=false;
         mCircEncoder.saveVideo(mOutputFile);
     }
 
+    private void showCameraPreview()
+    {
+        Log.d(TAG, "starting camera preview");
+        try {
+            mCamera.setPreviewTexture(mCameraTexture);
+        } catch (IOException ioe) {
+            throw new RuntimeException(ioe);
+        }
+        mCamera.startPreview();
+
+    }
     /**
      * The file save has completed.  We can resume recording.
      */
@@ -303,10 +340,9 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             throw new RuntimeException("WEIRD: got fileSaveCmplete when not in progress");
         }
         mFileSaveInProgress = false;
-        updateControls();
-        TextView tv = (TextView) findViewById(R.id.recording_text);
-        String str = getString(R.string.nowRecording);
-        tv.setText(str);
+        //updateControls();
+        //String str = getString(R.string.nowRecording);
+        String str;
 
         if (status == 0) {
             str = getString(R.string.recordingSucceeded);
@@ -322,7 +358,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
      */
     private void updateBufferStatus(long durationUsec) {
         mSecondsOfVideo = durationUsec / 1000000.0f;
-        updateControls();
+        //updateControls();
     }
 
 
@@ -347,26 +383,12 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         mCameraTexture = new SurfaceTexture(mTextureId);
         mCameraTexture.setOnFrameAvailableListener(this);
 
-        Log.d(TAG, "starting camera preview");
-        try {
-            mCamera.setPreviewTexture(mCameraTexture);
-        } catch (IOException ioe) {
-            throw new RuntimeException(ioe);
-        }
-        mCamera.startPreview();
-
+        showCameraPreview();
         // TODO: adjust bit rate based on frame rate?
         // TODO: adjust video width/height based on what we're getting from the camera preview?
         //       (can we guarantee that camera preview size is compatible with AVC video encoder?)
-        try {
-            mCircEncoder = new CircularEncoder(VIDEO_WIDTH, VIDEO_HEIGHT, 6000000,
-                    mCameraPreviewThousandFps / 1000, 7, mHandler);
-        } catch (IOException ioe) {
-            throw new RuntimeException(ioe);
-        }
-        mEncoderSurface = new WindowSurface(mEglCore, mCircEncoder.getInputSurface(), true);
 
-        updateControls();
+        //updateControls();
     }
 
     @Override   // SurfaceHolder.Callback
@@ -420,13 +442,13 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
 
         // Send it to the video encoder.
         if (!mFileSaveInProgress) {
-            mEncoderSurface.makeCurrent();
+            /*mEncoderSurface.makeCurrent();
             GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
             mFullFrameBlit.drawFrame(mTextureId, mTmpMatrix);
             drawExtra(mFrameNum, VIDEO_WIDTH, VIDEO_HEIGHT);
             mCircEncoder.frameAvailableSoon();
             mEncoderSurface.setPresentationTime(mCameraTexture.getTimestamp());
-            mEncoderSurface.swapBuffers();
+            mEncoderSurface.swapBuffers();*/
         }
 
         mFrameNum++;
