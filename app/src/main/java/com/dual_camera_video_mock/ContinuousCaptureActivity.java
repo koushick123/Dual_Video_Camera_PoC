@@ -311,6 +311,13 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             throw new RuntimeException(ioe);
         }
         mEncoderSurface = new WindowSurface(mEglCore, mCircEncoder.getInputSurface(), true);
+        mEncoderSurface.makeCurrent();
+        GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+        mFullFrameBlit.drawFrame(mTextureId, mTmpMatrix);
+        drawExtra(mFrameNum, VIDEO_WIDTH, VIDEO_HEIGHT);
+        mCircEncoder.frameAvailableSoon();
+        mEncoderSurface.setPresentationTime(mCameraTexture.getTimestamp());
+        mEncoderSurface.swapBuffers();
     }
 
     private void stopRecording()

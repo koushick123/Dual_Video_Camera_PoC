@@ -34,7 +34,7 @@ import java.nio.ByteBuffer;
  */
 public class CircularEncoder {
     private static final String TAG = "CircularEncoder";
-    private static final boolean VERBOSE = false;
+    private static final boolean VERBOSE = true;
 
     private static final String MIME_TYPE = "video/avc";    // H.264 Advanced Video Coding
     private static final int IFRAME_INTERVAL = 1;           // sync frame every second
@@ -276,6 +276,8 @@ public class CircularEncoder {
             final int TIMEOUT_USEC = 0;     // no timeout -- check for buffers, bail if none
 
             ByteBuffer[] encoderOutputBuffers = mEncoder.getOutputBuffers();
+            Log.d(TAG,"Buffer size == "+mBufferInfo.size);
+            Log.d(TAG,"Buffer flags == "+mBufferInfo.size);
             while (true) {
                 int encoderStatus = mEncoder.dequeueOutputBuffer(mBufferInfo, TIMEOUT_USEC);
                 if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
