@@ -52,7 +52,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
     private File mOutputFile;
     private CircularEncoder mCircEncoder;
     private WindowSurface mEncoderSurface;
-    private boolean mFileSaveInProgress;
+    private boolean mFileSaveInProgress=false;
 
     private MainHandler mHandler;
     private float mSecondsOfVideo;
@@ -311,19 +311,13 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             throw new RuntimeException(ioe);
         }
         mEncoderSurface = new WindowSurface(mEglCore, mCircEncoder.getInputSurface(), true);
-        mEncoderSurface.makeCurrent();
-        GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
-        mFullFrameBlit.drawFrame(mTextureId, mTmpMatrix);
-        drawExtra(mFrameNum, VIDEO_WIDTH, VIDEO_HEIGHT);
-        mCircEncoder.frameAvailableSoon();
-        mEncoderSurface.setPresentationTime(mCameraTexture.getTimestamp());
-        mEncoderSurface.swapBuffers();
     }
 
     private void stopRecording()
     {
         btn.setText("START RECORD");
         mRecordinProgress=false;
+        mFileSaveInProgress=true;
         mCircEncoder.saveVideo(mOutputFile);
     }
 
@@ -347,8 +341,6 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             throw new RuntimeException("WEIRD: got fileSaveCmplete when not in progress");
         }
         mFileSaveInProgress = false;
-        //updateControls();
-        //String str = getString(R.string.nowRecording);
         String str;
 
         if (status == 0) {
@@ -448,14 +440,14 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         mDisplaySurface.swapBuffers();
 
         // Send it to the video encoder.
-        if (!mFileSaveInProgress) {
-            /*mEncoderSurface.makeCurrent();
+        if (mRecordinProgress) {
+            mEncoderSurface.makeCurrent();
             GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
             mFullFrameBlit.drawFrame(mTextureId, mTmpMatrix);
             drawExtra(mFrameNum, VIDEO_WIDTH, VIDEO_HEIGHT);
             mCircEncoder.frameAvailableSoon();
             mEncoderSurface.setPresentationTime(mCameraTexture.getTimestamp());
-            mEncoderSurface.swapBuffers();*/
+            mEncoderSurface.swapBuffers();
         }
 
         mFrameNum++;
