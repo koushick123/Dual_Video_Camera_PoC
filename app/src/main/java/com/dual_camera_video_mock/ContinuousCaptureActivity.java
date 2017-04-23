@@ -411,7 +411,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
 
     @Override   // SurfaceTexture.OnFrameAvailableListener; runs on arbitrary thread
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        //Log.d(TAG, "frame available");
+        Log.d(TAG, "frame available");
         mHandler.sendEmptyMessage(MainHandler.MSG_FRAME_AVAILABLE);
     }
 
@@ -427,7 +427,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
      * here after onPause().
      */
     private void drawFrame() {
-        //Log.d(TAG, "drawFrame");
+        Log.d(TAG, "drawFrame");
         if (mEglCore == null) {
             Log.d(TAG, "Skipping drawFrame after shutdown");
             return;
