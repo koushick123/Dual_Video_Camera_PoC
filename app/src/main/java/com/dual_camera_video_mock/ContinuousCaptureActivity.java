@@ -1,6 +1,7 @@
 package com.dual_camera_video_mock;
 
 import android.app.Activity;
+import android.content.res.Configuration;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.opengl.GLES20;
@@ -8,9 +9,12 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
+import android.view.Display;
+import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.Toast;
 
@@ -34,9 +38,9 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         SurfaceTexture.OnFrameAvailableListener {
     private static final String TAG = "ContinuousCaptureActivity";
 
-    private static final int VIDEO_WIDTH = 1280;  // dimensions for 720p video
-    private static final int VIDEO_HEIGHT = 720;
-    private static final int DESIRED_PREVIEW_FPS = 15;
+    private static int VIDEO_WIDTH = 1280;  // dimensions for 720p video
+    private static int VIDEO_HEIGHT = 720;
+    private static final int DESIRED_PREVIEW_FPS = 30;
 
     private EglCore mEglCore;
     private WindowSurface mDisplaySurface;
@@ -55,7 +59,9 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
     private boolean mFileSaveInProgress=false;
 
     private MainHandler mHandler;
-    private float mSecondsOfVideo;
+    boolean isFrontFacingCam=false;
+    int cameraId;
+    float mSecondsOfVideo;
     Button btn;
     private boolean mRecordinProgress=false;
 
@@ -165,9 +171,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
                 }
             }
         });
-
-        //updateControls();
-    }
+     }
 
     @Override
     protected void onResume() {
@@ -223,8 +227,10 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         int numCameras = Camera.getNumberOfCameras();
         for (int i = 0; i < numCameras; i++) {
             Camera.getCameraInfo(i, info);
-            if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
+            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
                 mCamera = Camera.open(i);
+                cameraId = i;
+                isFrontFacingCam=true;
                 break;
             }
         }
@@ -256,7 +262,19 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
 
         // Set the preview aspect ratio.
         AspectFrameLayout layout = (AspectFrameLayout) findViewById(R.id.continuousCapture_afl);
-        layout.setAspectRatio((double) cameraPreviewSize.width / cameraPreviewSize.height);
+        //layout.setAspectRatio((double) cameraPreviewSize.width / cameraPreviewSize.height);
+        Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
+        int orientation = display.getOrientation();
+        if(orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            layout.setAspectRatio((double) 1280 / 720);
+            VIDEO_HEIGHT=720;
+            VIDEO_WIDTH=1280;
+        }
+        else{
+            layout.setAspectRatio((double) 720 / 1280);
+            VIDEO_HEIGHT=1280;
+            VIDEO_WIDTH=720;
+        }
     }
 
     /**
@@ -269,35 +287,6 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             mCamera = null;
             Log.d(TAG, "releaseCamera -- done");
         }
-    }
-
-    /**
-     * Updates the current state of the controls.
-     */
-    private void updateControls() {
-        boolean wantEnabled = (mCircEncoder != null) && !mFileSaveInProgress;
-        Button button = (Button) findViewById(R.id.capture_button);
-        if (button.isEnabled() != wantEnabled) {
-            Log.d(TAG, "setting enabled = " + wantEnabled);
-            button.setEnabled(wantEnabled);
-        }
-    }
-
-    /**
-     * Handles onClick for "capture" button.
-     */
-    public void clickCapture(@SuppressWarnings("unused") View unused) {
-        Log.d(TAG, "capture");
-        if (mFileSaveInProgress) {
-            Log.w(TAG, "HEY: file save is already in progress");
-            return;
-        }
-
-        // The button is disabled in onCreate(), and not enabled until the encoder and output
-        // surface is ready, so it shouldn't be possible to get here with a null mCircEncoder.
-        mFileSaveInProgress = true;
-        //updateControls();
-
     }
 
     private void startRecording()
@@ -323,6 +312,53 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
 
     private void showCameraPreview()
     {
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        int degrees = 0;
+        switch (rotation) {
+            case Surface.ROTATION_0:
+                degrees = 0;
+                break; // Natural orientation
+            case Surface.ROTATION_90:
+                degrees = 90;
+                break; // Landscape left
+            case Surface.ROTATION_180:
+                degrees = 180;
+                break;// Upside down
+            case Surface.ROTATION_270:
+                degrees = 270;
+                break;// Landscape right
+        }
+        int displayRotation;
+        Camera.CameraInfo camInfo = new Camera.CameraInfo();
+        Camera.getCameraInfo(cameraId, camInfo);
+        int cameraRotationOffset = camInfo.orientation;
+        if (isFrontFacingCam) {
+            displayRotation = (cameraRotationOffset + degrees) % 360;
+            displayRotation = (360 - displayRotation) % 360; // compensate
+            // the
+            // mirror
+        } else { // back-facing
+            displayRotation = (cameraRotationOffset - degrees + 360) % 360;
+        }
+
+        Log.v(TAG, "rotation cam / phone = displayRotation: " + cameraRotationOffset + " / " + degrees + " = "
+                + displayRotation);
+
+        mCamera.setDisplayOrientation(displayRotation);
+
+        int rotate;
+        if (isFrontFacingCam) {
+            rotate = (360 + cameraRotationOffset + degrees) % 360;
+            //rotate=180;
+        } else {
+            rotate = (360 + cameraRotationOffset - degrees) % 360;
+        }
+
+        Log.v(TAG, "screenshot rotation: " + cameraRotationOffset + " / " + degrees + " = " + rotate);
+
+        Camera.Parameters parameters = mCamera.getParameters();
+        parameters.setRotation(rotate);
+        mCamera.setParameters(parameters);
         Log.d(TAG, "starting camera preview");
         try {
             mCamera.setPreviewTexture(mCameraTexture);
@@ -357,7 +393,6 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
      */
     private void updateBufferStatus(long durationUsec) {
         mSecondsOfVideo = durationUsec / 1000000.0f;
-        //updateControls();
     }
 
 
@@ -386,8 +421,6 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         // TODO: adjust bit rate based on frame rate?
         // TODO: adjust video width/height based on what we're getting from the camera preview?
         //       (can we guarantee that camera preview size is compatible with AVC video encoder?)
-
-        //updateControls();
     }
 
     @Override   // SurfaceHolder.Callback
@@ -403,7 +436,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
 
     @Override   // SurfaceTexture.OnFrameAvailableListener; runs on arbitrary thread
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        Log.d(TAG, "frame available");
+        //Log.d(TAG, "frame available");
         mHandler.sendEmptyMessage(MainHandler.MSG_FRAME_AVAILABLE);
     }
 
@@ -419,7 +452,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
      * here after onPause().
      */
     private void drawFrame() {
-        Log.d(TAG, "drawFrame");
+        //Log.d(TAG, "drawFrame");
         if (mEglCore == null) {
             Log.d(TAG, "Skipping drawFrame after shutdown");
             return;
