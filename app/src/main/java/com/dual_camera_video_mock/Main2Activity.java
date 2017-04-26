@@ -150,18 +150,17 @@ public class Main2Activity extends AppCompatActivity {
 
     private void startRecording()
     {
-        mCamera.unlock();
-        mMediaRecorder.setCamera(mCamera);
-        mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
-        mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
-        if (mNextVideoAbsolutePath == null || mNextVideoAbsolutePath.isEmpty()) {
-            mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
-        }
-        mMediaRecorder.setProfile(CamcorderProfile.get(currentCameraId,CamcorderProfile.QUALITY_HIGH));
-        mMediaRecorder.setOutputFile(mNextVideoAbsolutePath);
-        mMediaRecorder.setPreviewDisplay(mPreview.getHolder().getSurface());
-
         if(!mIsRecording) {
+            mCamera.unlock();
+            mMediaRecorder.setCamera(mCamera);
+            mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+            mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+            if (mNextVideoAbsolutePath == null || mNextVideoAbsolutePath.isEmpty()) {
+                mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
+            }
+            mMediaRecorder.setProfile(CamcorderProfile.get(currentCameraId,CamcorderProfile.QUALITY_HIGH));
+            mMediaRecorder.setOutputFile(mNextVideoAbsolutePath);
+            mMediaRecorder.setPreviewDisplay(mPreview.getHolder().getSurface());
             try {
                 mMediaRecorder.prepare();
                 mMediaRecorder.start();
