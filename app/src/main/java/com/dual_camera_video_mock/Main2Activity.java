@@ -185,6 +185,26 @@ public class Main2Activity extends AppCompatActivity {
 
     private void startRecording()
     {
+<<<<<<< HEAD
+        if(!mIsRecording) {
+            mCamera.unlock();
+            mMediaRecorder.setCamera(mCamera);
+            mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+            mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+            if (mNextVideoAbsolutePath == null || mNextVideoAbsolutePath.isEmpty()) {
+                mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
+            }
+            mMediaRecorder.setProfile(CamcorderProfile.get(currentCameraId,CamcorderProfile.QUALITY_HIGH));
+            mMediaRecorder.setOutputFile(mNextVideoAbsolutePath);
+            mMediaRecorder.setPreviewDisplay(mPreview.getHolder().getSurface());
+            try {
+                mMediaRecorder.prepare();
+                mMediaRecorder.start();
+                videoBtn.setText("STOP VIDEO");
+                mIsRecording = true;
+            } catch (IOException e) {
+                e.printStackTrace();
+=======
         if(mMediaRecorder == null){
             mMediaRecorder = new MediaRecorder();
         }
@@ -206,6 +226,7 @@ public class Main2Activity extends AppCompatActivity {
             mIsRecording = true;
             if(fileOutputStream==null) {
                 fileOutputStream = new FileWriter(video_list_path);
+>>>>>>> 2d9f1f7b9c17512ae055edd2f9fef366609740cd
             }
         }
         catch (FileNotFoundException e) {
