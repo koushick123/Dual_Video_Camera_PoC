@@ -6,7 +6,7 @@ android {
 
     defaultConfig {
         applicationId "com.dual_camera_video_mock"
-        minSdkVersion 10
+        minSdkVersion 18
         targetSdkVersion 25
         versionCode 1
         versionName "1.0"
@@ -17,10 +17,17 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+
+    repositories {
+        flatDir {
+            dirs 'libs'
+        }
+    }
 }
 
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
     testCompile 'junit:junit:4.12'
     compile 'com.android.support:appcompat-v7:25.2.0'
+    compile(name:'FFmpegAndroid-0.3.2', ext:'aar')
 }

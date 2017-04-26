@@ -18,6 +18,14 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
+import com.github.hiteshsondhi88.libffmpeg.ExecuteBinaryResponseHandler;
+import com.github.hiteshsondhi88.libffmpeg.FFmpeg;
+import com.github.hiteshsondhi88.libffmpeg.LoadBinaryResponseHandler;
+import com.github.hiteshsondhi88.libffmpeg.exceptions.FFmpegCommandAlreadyRunningException;
+import com.github.hiteshsondhi88.libffmpeg.exceptions.FFmpegNotSupportedException;
+
+import java.io.FileNotFoundException;
+import java.io.FileWriter;
 import java.io.IOException;
 
 public class Main2Activity extends AppCompatActivity {
@@ -33,6 +41,10 @@ public class Main2Activity extends AppCompatActivity {
     String mNextVideoAbsolutePath;
     FrameLayout preview;
     private SurfaceHolder mHolder;
+    static int part=1;
+    FileWriter fileOutputStream;
+    String video_list_path = "";
+    String concat = "concat:";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,12 +61,12 @@ public class Main2Activity extends AppCompatActivity {
             }
         }
 
+        video_list_path = getApplicationContext().getExternalFilesDir(null).getAbsolutePath() + "/video_list.txt";
         // Create our Preview view and set it as the content of our activity.
         mPreview = new CameraPreview(this, mCamera);
         preview = (FrameLayout) findViewById(R.id.camera_preview);
         preview.addView(mPreview);
         videoBtn = (Button)findViewById(R.id.button_capture);
-        mMediaRecorder = new MediaRecorder();
         videoBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -72,6 +84,9 @@ public class Main2Activity extends AppCompatActivity {
             @Override
             public void onClick(View view) {
                 mCamera.stopPreview();
+                if(mIsRecording) {
+                    switchRecording();
+                }
                 releaseCamera();
                 if(BACK_CAM){
                     mCamera = getCameraInstance(false);
@@ -89,6 +104,26 @@ public class Main2Activity extends AppCompatActivity {
                 }
             }
         });
+        FFmpeg ffmpeg = FFmpeg.getInstance(getApplicationContext());
+        try {
+            ffmpeg.loadBinary(new LoadBinaryResponseHandler() {
+
+                @Override
+                public void onStart() {}
+
+                @Override
+                public void onFailure() {}
+
+                @Override
+                public void onSuccess() {}
+
+                @Override
+                public void onFinish() {}
+            });
+        } catch (FFmpegNotSupportedException e) {
+            // Handle if FFmpeg is not supported by device
+            Toast.makeText(getApplicationContext(),"FFMPEG NOT SUPPORTED...",Toast.LENGTH_SHORT).show();
+        }
     }
 
     private boolean checkCameraHardware(Context context) {
@@ -150,6 +185,7 @@ public class Main2Activity extends AppCompatActivity {
 
     private void startRecording()
     {
+<<<<<<< HEAD
         if(!mIsRecording) {
             mCamera.unlock();
             mMediaRecorder.setCamera(mCamera);
@@ -168,7 +204,36 @@ public class Main2Activity extends AppCompatActivity {
                 mIsRecording = true;
             } catch (IOException e) {
                 e.printStackTrace();
+=======
+        if(mMediaRecorder == null){
+            mMediaRecorder = new MediaRecorder();
+        }
+        mCamera.unlock();
+        mMediaRecorder.setCamera(mCamera);
+        mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+        mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+        if (mNextVideoAbsolutePath == null || mNextVideoAbsolutePath.isEmpty()) {
+            mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
+        }
+        mMediaRecorder.setProfile(CamcorderProfile.get(currentCameraId,CamcorderProfile.QUALITY_HIGH));
+        mMediaRecorder.setOutputFile(mNextVideoAbsolutePath);
+        mMediaRecorder.setPreviewDisplay(mPreview.getHolder().getSurface());
+
+        try {
+            mMediaRecorder.prepare();
+            mMediaRecorder.start();
+            videoBtn.setText("STOP VIDEO");
+            mIsRecording = true;
+            if(fileOutputStream==null) {
+                fileOutputStream = new FileWriter(video_list_path);
+>>>>>>> 2d9f1f7b9c17512ae055edd2f9fef366609740cd
             }
+        }
+        catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+        catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
@@ -177,17 +242,88 @@ public class Main2Activity extends AppCompatActivity {
                 + System.currentTimeMillis() + ".mp4";
     }
 
+    private void switchRecording()
+    {
+        mMediaRecorder.stop();
+        Log.d(LOG_TAG,"Video saved part: "+part++ + " "+mNextVideoAbsolutePath);
+        concat+=mNextVideoAbsolutePath+"|";
+        try {
+            fileOutputStream.write("file '"+mNextVideoAbsolutePath+"'\n");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
+    }
+
     private void stopRecording()
     {
         videoBtn.setText("Take Video");
-        mMediaRecorder.stop();
+        releaseMediaRecorder();
         mIsRecording=false;
         if(Build.VERSION.SDK_INT <= Build.VERSION_CODES.ICE_CREAM_SANDWICH){
             mCamera.lock();
         }
-        Toast.makeText(getApplicationContext(), "Video saved: " + mNextVideoAbsolutePath,
-                Toast.LENGTH_SHORT).show();
-        Log.d(LOG_TAG, "Video saved: " + mNextVideoAbsolutePath);
+        //Log.d(LOG_TAG, "Video saved: " + mNextVideoAbsolutePath);
+        concat+=mNextVideoAbsolutePath+"|";
+        try {
+            fileOutputStream.write("file '"+mNextVideoAbsolutePath+"'");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        finally
+        {
+            try {
+                fileOutputStream.close();
+                fileOutputStream=null;
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        //Now, MERGE ALL video parts
+        final FFmpeg ffmpeg = FFmpeg.getInstance(getApplicationContext());
+        try {
+            // to execute "ffmpeg -version" command you just need to pass "-version"
+            String cmd[] = new String[]{"-f","concat","-safe","0","-i",video_list_path,"-c","copy",
+                    getApplicationContext().getExternalFilesDir(null).getAbsolutePath() + "/final_video.mp4"};
+            ffmpeg.execute(cmd, new ExecuteBinaryResponseHandler(){
+                @Override
+                public void onStart() {
+                    Log.d(LOG_TAG,"Command START....");
+                }
+
+                @Override
+                public void onProgress(String message) {
+                    Log.d(LOG_TAG,"Command In progress...."+message);
+                    Log.d(LOG_TAG,"Command running ? == "+ffmpeg.isFFmpegCommandRunning());
+                }
+
+                @Override
+                public void onFailure(String message) {
+                    Log.d(LOG_TAG,"Command FAILED...."+message);
+                    ffmpeg.killRunningProcesses();
+                    Log.d(LOG_TAG,"Kill any existing FFMPEG process");
+                }
+
+                @Override
+                public void onSuccess(String message) {
+                    Log.d(LOG_TAG,"Command SUCCESS...."+message);
+                    Log.d(LOG_TAG,"Video finally saved at "+getApplicationContext().getExternalFilesDir(null).getAbsolutePath() + "/final_video.mp4");
+                    Toast.makeText(getApplicationContext(), "Video saved: " + getApplicationContext().getExternalFilesDir(null).getAbsolutePath()
+                            + "/final_video.mp4",
+                            Toast.LENGTH_SHORT).show();
+                }
+
+                @Override
+                public void onFinish() {
+                    Log.d(LOG_TAG,"Command FINISH....");
+                    ffmpeg.killRunningProcesses();
+                    Log.d(LOG_TAG,"Kill any existing FFMPEG process");
+                }
+            });
+        } catch (FFmpegCommandAlreadyRunningException e) {
+            // Handle if FFmpeg is already running
+        }
     }
 
     private void releaseCamera(){
@@ -256,7 +392,7 @@ public class Main2Activity extends AppCompatActivity {
             // If your preview can change or rotate, take care of those events here.
             // Make sure to stop the preview before resizing or reformatting it.
 
-            if (mHolder.getSurface() == null) {
+            /*if (mHolder.getSurface() == null) {
                 // preview surface does not exist
                 return;
             }
@@ -270,7 +406,7 @@ public class Main2Activity extends AppCompatActivity {
 
             // set preview size and make any resize, rotate or
             // reformatting changes here
-            createPreview();
+            createPreview();*/
         }
     }
 
