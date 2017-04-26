@@ -16,7 +16,7 @@ import java.nio.ByteBuffer;
 public class CircularEncoderBuffer {
     private static final String TAG = "CircularencoderBuffer";
     private static final boolean EXTRA_DEBUG = true;
-    private static final boolean VERBOSE = true;
+    private static final boolean VERBOSE = false;
 
     // Raw data (e.g. AVC NAL units) held here.
     //

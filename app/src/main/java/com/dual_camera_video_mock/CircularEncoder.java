@@ -277,7 +277,7 @@ public class CircularEncoder {
 
             ByteBuffer[] encoderOutputBuffers = mEncoder.getOutputBuffers();
             Log.d(TAG,"Buffer size == "+mBufferInfo.size);
-            Log.d(TAG,"Buffer flags == "+mBufferInfo.size);
+            Log.d(TAG,"Buffer flags == "+mBufferInfo.flags);
             while (true) {
                 int encoderStatus = mEncoder.dequeueOutputBuffer(mBufferInfo, TIMEOUT_USEC);
                 if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
@@ -382,7 +382,6 @@ public class CircularEncoder {
                         MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
                 int videoTrack = muxer.addTrack(mEncodedFormat);
                 muxer.start();
-
                 do {
                     ByteBuffer buf = mEncBuffer.getChunk(index, info);
                     if (VERBOSE) {

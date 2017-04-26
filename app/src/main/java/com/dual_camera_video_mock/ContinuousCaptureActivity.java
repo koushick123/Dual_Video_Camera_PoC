@@ -59,11 +59,13 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
     private boolean mFileSaveInProgress=false;
 
     private MainHandler mHandler;
-    boolean isFrontFacingCam=false;
-    int cameraId;
+    boolean isFrontFacingCam=true;
+    private int cameraId;
     float mSecondsOfVideo;
     Button btn;
+    Button switchBtn;
     private boolean mRecordinProgress=false;
+    private boolean switchWhileRecord=false;
 
     /**
      * Custom message handler for main UI thread.
@@ -171,6 +173,17 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
                 }
             }
         });
+        switchBtn = (Button)findViewById(R.id.switchCamera);
+        switchBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if(mCamera!=null) {
+                    releaseCamera();
+                }
+                openCamera(VIDEO_WIDTH,VIDEO_HEIGHT,DESIRED_PREVIEW_FPS);
+                showCameraPreview();
+            }
+        });
      }
 
     @Override
@@ -227,11 +240,21 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         int numCameras = Camera.getNumberOfCameras();
         for (int i = 0; i < numCameras; i++) {
             Camera.getCameraInfo(i, info);
-            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-                mCamera = Camera.open(i);
-                cameraId = i;
-                isFrontFacingCam=true;
-                break;
+            if(!isFrontFacingCam) {
+                if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                    mCamera = Camera.open(i);
+                    cameraId = i;
+                    isFrontFacingCam = true;
+                    break;
+                }
+            }
+            else{
+                if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
+                    mCamera = Camera.open(i);
+                    cameraId = i;
+                    isFrontFacingCam = false;
+                    break;
+                }
             }
         }
         if (mCamera == null) {
@@ -293,9 +316,9 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
     {
         btn.setText("STOP RECORD");
         mRecordinProgress=true;
-        try {
+        try{
             mCircEncoder = new CircularEncoder(VIDEO_WIDTH, VIDEO_HEIGHT, 6000000,
-                    mCameraPreviewThousandFps / 1000, 7, mHandler);
+                    mCameraPreviewThousandFps / 1000, 20, mHandler);
         } catch (IOException ioe) {
             throw new RuntimeException(ioe);
         }
