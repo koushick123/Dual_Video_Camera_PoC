@@ -185,26 +185,6 @@ public class Main2Activity extends AppCompatActivity {
 
     private void startRecording()
     {
-<<<<<<< HEAD
-        if(!mIsRecording) {
-            mCamera.unlock();
-            mMediaRecorder.setCamera(mCamera);
-            mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
-            mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
-            if (mNextVideoAbsolutePath == null || mNextVideoAbsolutePath.isEmpty()) {
-                mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
-            }
-            mMediaRecorder.setProfile(CamcorderProfile.get(currentCameraId,CamcorderProfile.QUALITY_HIGH));
-            mMediaRecorder.setOutputFile(mNextVideoAbsolutePath);
-            mMediaRecorder.setPreviewDisplay(mPreview.getHolder().getSurface());
-            try {
-                mMediaRecorder.prepare();
-                mMediaRecorder.start();
-                videoBtn.setText("STOP VIDEO");
-                mIsRecording = true;
-            } catch (IOException e) {
-                e.printStackTrace();
-=======
         if(mMediaRecorder == null){
             mMediaRecorder = new MediaRecorder();
         }
@@ -226,7 +206,6 @@ public class Main2Activity extends AppCompatActivity {
             mIsRecording = true;
             if(fileOutputStream==null) {
                 fileOutputStream = new FileWriter(video_list_path);
->>>>>>> 2d9f1f7b9c17512ae055edd2f9fef366609740cd
             }
         }
         catch (FileNotFoundException e) {
@@ -310,7 +289,7 @@ public class Main2Activity extends AppCompatActivity {
                     Log.d(LOG_TAG,"Command SUCCESS...."+message);
                     Log.d(LOG_TAG,"Video finally saved at "+getApplicationContext().getExternalFilesDir(null).getAbsolutePath() + "/final_video.mp4");
                     Toast.makeText(getApplicationContext(), "Video saved: " + getApplicationContext().getExternalFilesDir(null).getAbsolutePath()
-                            + "/final_video.mp4",
+                                    + "/final_video.mp4",
                             Toast.LENGTH_SHORT).show();
                 }
 
@@ -411,7 +390,7 @@ public class Main2Activity extends AppCompatActivity {
     }
 
     private void setCameraDisplayOrientation(Activity activity,
-                                                    int cameraId, android.hardware.Camera camera) {
+                                             int cameraId, android.hardware.Camera camera) {
         android.hardware.Camera.CameraInfo info =
                 new android.hardware.Camera.CameraInfo();
         android.hardware.Camera.getCameraInfo(cameraId, info);
