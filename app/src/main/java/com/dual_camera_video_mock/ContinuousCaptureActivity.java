@@ -103,7 +103,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         public void handleMessage(Message msg) {
             ContinuousCaptureActivity activity = mWeakActivity.get();
             if (activity == null) {
-                Log.d(TAG, "Got message for dead activity");
+                Log.d(TAG, "Got msg for dead act.");
                 return;
             }
 
