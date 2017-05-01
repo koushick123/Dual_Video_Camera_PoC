@@ -19,16 +19,10 @@ class MyGLSurfaceView extends GLSurfaceView {
         // Create an OpenGL ES 2.0 context
         setEGLContextClientVersion(2);
 
-        mRenderer = new MyGLRenderer(this);
+        mRenderer = new MyGLRenderer(this,context);
 
         // Set the Renderer for drawing on the GLSurfaceView
         setRenderer(mRenderer);
-    }
-
-    public void closeCamera()
-    {
-        Log.d(TAG,"closing camera");
-        mRenderer.close();
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.dual_camera_video_mock;
 
+import android.media.AudioFormat;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
@@ -38,6 +39,12 @@ public class CircularEncoder {
 
     private static final String MIME_TYPE = "video/avc";    // H.264 Advanced Video Coding
     private static final int IFRAME_INTERVAL = 1;           // sync frame every second
+
+    private static final String AUD_MIME_TYPE = "audio/mp4a-latm";
+    private static final int SAMPLE_RATE = 44100;	// 44.1[KHz] is only setting guaranteed to be available on all devices.
+    private static final int BIT_RATE = 64000;
+    public static final int SAMPLES_PER_FRAME = 1024;	// AAC, bytes/frame/channel
+    public static final int FRAMES_PER_BUFFER = 25; 	// AAC, frame/buffer/sec
 
     private EncoderThread mEncoderThread;
     private Surface mInputSurface;
@@ -108,11 +115,24 @@ public class CircularEncoder {
         mInputSurface = mEncoder.createInputSurface();
         mEncoder.start();
 
+        prepareAudioEncoder();
         // Start the encoder thread last.  That way we're sure it can see all of the state
         // we've initialized.
         mEncoderThread = new EncoderThread(mEncoder, encBuffer, cb);
         mEncoderThread.start();
         mEncoderThread.waitUntilReady();
+    }
+
+    private void prepareAudioEncoder() throws IOException {
+        final MediaFormat audioFormat = MediaFormat.createAudioFormat(MIME_TYPE, SAMPLE_RATE, 1);
+        audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+        audioFormat.setInteger(MediaFormat.KEY_CHANNEL_MASK, AudioFormat.CHANNEL_IN_MONO);
+        audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE);
+        audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
+        Log.d(TAG, "format: " + audioFormat);
+        mEncoder = MediaCodec.createEncoderByType(AUD_MIME_TYPE);
+        mEncoder.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        mEncoder.start();
     }
 
     /**

@@ -1,8 +1,8 @@
 package com.dual_camera_video_mock;
 
+import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
-import android.hardware.camera2.CameraMetadata;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.Iterator;
+import java.util.List;
 
 import javax.microedition.khronos.opengles.GL10;
 
@@ -20,6 +22,7 @@ import javax.microedition.khronos.opengles.GL10;
  */
 class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAvailableListener{
 
+    private String TAG = MyGLRenderer.class.getName();
     private final String vss =
             "attribute vec2 vPosition;\n" +
                     "attribute vec2 vTexCoord;\n" +
@@ -49,8 +52,10 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
     private boolean mUpdateST = false;
 
     private MyGLSurfaceView mView;
+    private Context audioVideo;
+    private boolean isPreviewRunning=false;
 
-    MyGLRenderer( MyGLSurfaceView view ) {
+    MyGLRenderer( MyGLSurfaceView view, Context audVid ) {
         mView = view;
         float[] vtmp = { 1.0f, -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f, 1.0f };
         float[] ttmp = { 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f };
@@ -60,6 +65,7 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         pTexCoord = ByteBuffer.allocateDirect(8*4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         pTexCoord.put ( ttmp );
         pTexCoord.position(0);
+        audioVideo=audVid;
     }
 
     public void close()
@@ -95,16 +101,37 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         for(int i=0;i<Camera.getNumberOfCameras();i++)
         {
             Camera.getCameraInfo(i, info);
-            if(info.facing == CameraMetadata.LENS_FACING_BACK){
+            if(info.facing == Camera.CameraInfo.CAMERA_FACING_BACK){
                 mCamera = Camera.open(i);
                 break;
             }
         }
-        try{
-            mCamera.setPreviewTexture(mSTexture);
-        } catch (IOException e) {
-            e.printStackTrace();
+
+        Camera.Parameters parameters = mCamera.getParameters();
+        List<int[]> fps = parameters.getSupportedPreviewFpsRange();
+        Iterator<int[]> iter = fps.iterator();
+        //Safe to assume every camera would support 15 fps.
+        int MIN_FPS = 15;
+        int MAX_FPS = 15;
+        while(iter.hasNext())
+        {
+            int[] frames = iter.next();
+            if(!iter.hasNext())
+            {
+                MIN_FPS = frames[0];
+                MAX_FPS = frames[1];
+            }
         }
+        Log.d(TAG,"Setting min and max Fps  == "+MIN_FPS+" , "+MAX_FPS);
+        List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
+        for(int i=0;i<previewSizes.size();i++)
+        {
+            Log.d(TAG,"Preview size == "+previewSizes.get(i).height+", "+previewSizes.get(i).width);
+        }
+        parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
+        mCamera.setParameters(parameters);
+        parameters.setPreviewSize(720,720);
+        showPreview();
         GLES20.glClearColor(1.0f,1.0f,1.0f,1.0f);
         hProgram = loadShader(vss,fss);
     }
@@ -136,8 +163,25 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         GLES20.glFlush();
     }
 
+    private void showPreview()
+    {
+        try{
+            mCamera.setPreviewTexture(mSTexture);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        mCamera.startPreview();
+        isPreviewRunning=true;
+    }
+
+    private void stopPreview()
+    {
+        mCamera.stopPreview();
+        isPreviewRunning=false;
+    }
+
     public void onSurfaceChanged(GL10 unused, int width, int height) {
-        //GLES20.glViewport(0, 0, width, height);
+
     }
 
     private static int loadShader ( String vss, String fss ) {
