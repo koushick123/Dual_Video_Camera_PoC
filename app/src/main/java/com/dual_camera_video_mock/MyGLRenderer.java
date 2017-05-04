@@ -50,15 +50,16 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
     private SurfaceTexture mSTexture;
 
     private boolean mUpdateST = false;
+    boolean isPreviewRunning=false;
 
     private MyGLSurfaceView mView;
     private Context audioVideo;
-    private boolean isPreviewRunning=false;
 
     MyGLRenderer( MyGLSurfaceView view, Context audVid ) {
         mView = view;
         float[] vtmp = { 1.0f, -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f, 1.0f };
         float[] ttmp = { 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f };
+
         pVertex = ByteBuffer.allocateDirect(8*4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         pVertex.put ( vtmp );
         pVertex.position(0);
@@ -130,7 +131,6 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         }
         parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
         mCamera.setParameters(parameters);
-        parameters.setPreviewSize(720,720);
         showPreview();
         GLES20.glClearColor(1.0f,1.0f,1.0f,1.0f);
         hProgram = loadShader(vss,fss);
@@ -139,11 +139,8 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
     public void onDrawFrame(GL10 unused) {
         // Redraw background color
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-        synchronized (this){
-            mSTexture.updateTexImage();
-            mUpdateST=false;
-        }
+        mSTexture.updateTexImage();
+        mUpdateST=false;
 
         GLES20.glUseProgram(hProgram);
         int ph = GLES20.glGetAttribLocation(hProgram, "vPosition");
@@ -182,6 +179,7 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
 
     public void onSurfaceChanged(GL10 unused, int width, int height) {
 
+        Log.d(TAG,"onSurfaceChanged");
     }
 
     private static int loadShader ( String vss, String fss ) {
