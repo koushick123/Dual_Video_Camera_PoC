@@ -169,20 +169,20 @@ public class AudioVideoRecording extends AppCompatActivity {
             Log.d(TAG,"Input buffer length == "+inputBuffers.length);
             MediaMuxer mediaMuxer = null;
             ByteBuffer buf;
-            boolean isEOS=false;
+            boolean isEOS;
             int trackIndex = 0;
             int audioBufferInd;
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-            int count=1;
+            long count=0;
             try {
                 File file = new File(getExternalFilesDir(null),"myaudio.mp4");
                 Log.d(TAG,"Saving audio at == "+file.getPath());
                 mediaMuxer = new MediaMuxer(file.getPath(),MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
 
-                while (true) {
+MAIN_LOOP:                while (true) {
                     bufferIndex = mediaCodec.dequeueInputBuffer(TIMEOUT);
                     isEOS=false;
-                    Log.d(TAG,"Index == "+bufferIndex);
+                    Log.d(TAG,"INPUT buffer Index == "+bufferIndex);
                     if(!isRecording){
                         Log.d(TAG, "send BUFFER_FLAG_END_OF_STREAM");
                         mediaCodec.queueInputBuffer(bufferIndex, 0, len, System.nanoTime()/1000, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
@@ -210,38 +210,54 @@ public class AudioVideoRecording extends AppCompatActivity {
                     }
 
                     //Extract encoded data
-                    Log.d(TAG,"Retrieve Encoded Data....");
-                    ByteBuffer[] outputBuffers = mediaCodec.getOutputBuffers();
-                    audioBufferInd = mediaCodec.dequeueOutputBuffer(bufferInfo, TIMEOUT);
-                    Log.d(TAG,"Audio buffer index = "+audioBufferInd);
-                    if (audioBufferInd >= 0) {
-                        if (bufferInfo.size != 0) {
-                            outputBuffers[audioBufferInd].position(bufferInfo.offset);
-                            outputBuffers[audioBufferInd].limit(bufferInfo.offset + bufferInfo.size);
-                            Log.d(TAG,"Writing data size == "+bufferInfo.size);
-                            mediaMuxer.writeSampleData(trackIndex, outputBuffers[audioBufferInd], bufferInfo);
-                            mediaCodec.releaseOutputBuffer(audioBufferInd,false);
-                        }
-                    } else if (audioBufferInd == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                        outputBuffers = mediaCodec.getOutputBuffers();
-                    } else if (audioBufferInd == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        // Subsequent data will conform to new format.
-                        format = mediaCodec.getOutputFormat();
-                        trackIndex = mediaMuxer.addTrack(format);
-                        mediaMuxer.start();
-                    }
-                    else if (audioBufferInd == MediaCodec.BUFFER_FLAG_END_OF_STREAM){
-                        break;
-                    }
-                    else if (audioBufferInd == MediaCodec.INFO_TRY_AGAIN_LATER){
-                        if(!isEOS){
-                            count++;
-                            if(count > 100){
-                                break;
+                        ByteBuffer[] outputBuffers = mediaCodec.getOutputBuffers();
+INNER_LOOP:             while(true) {
+                            Log.d(TAG, "Retrieve Encoded Data....");
+                            audioBufferInd = mediaCodec.dequeueOutputBuffer(bufferInfo, TIMEOUT);
+                            Log.d(TAG, "OUTPUT buffer index = " + audioBufferInd);
+                            if (audioBufferInd >= 0) {
+                                if (bufferInfo.size != 0) {
+                                    outputBuffers[audioBufferInd].position(bufferInfo.offset);
+                                    outputBuffers[audioBufferInd].limit(bufferInfo.offset + bufferInfo.size);
+                                    Log.d(TAG, "Writing data size == " + bufferInfo.size);
+                                    count+=bufferInfo.size;
+                                    mediaMuxer.writeSampleData(trackIndex, outputBuffers[audioBufferInd], bufferInfo);
+                                    mediaCodec.releaseOutputBuffer(audioBufferInd, false);
+                                    if(!isEOS) {
+                                        break INNER_LOOP;
+                                    }
+                                    else{
+                                        break MAIN_LOOP;
+                                    }
+                                }
+                            } else if (audioBufferInd == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                                outputBuffers = mediaCodec.getOutputBuffers();
+                            } else if (audioBufferInd == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                                // Subsequent data will conform to new format.
+                                format = mediaCodec.getOutputFormat();
+                                trackIndex = mediaMuxer.addTrack(format);
+                                mediaMuxer.start();
+                            } else if (audioBufferInd == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                                if (!isEOS) {
+                                    break INNER_LOOP;
+                                }
+                                else{
+                                    break MAIN_LOOP;
+                                }
                             }
-                        }
                     }
                 }
+                String bytes = "";
+                if (count > 1000000){
+                    bytes = count/1000000+" MB";
+                }
+                else if(count > 1000){
+                    bytes = count/1000+" KB";
+                }
+                else{
+                    bytes = count+" Bytes";
+                }
+                Log.d(TAG,"Written "+bytes+" of data");
                 audioRecord.stop();
                 Log.d(TAG,"Audio Record STOPPED");
                 Log.d(TAG,"Audio saved");
