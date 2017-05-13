@@ -23,6 +23,7 @@ class MyGLSurfaceView extends GLSurfaceView {
         mRenderer = new MyGLRenderer(this,context);
 
         // Set the Renderer for drawing on the GLSurfaceView
+        Log.d(TAG,"AFter create MyGLRenderer ");
         setRenderer(mRenderer);
     }
 
@@ -31,7 +32,7 @@ class MyGLSurfaceView extends GLSurfaceView {
         super.surfaceCreated(holder);
         ViewGroup.LayoutParams layoutParams = this.getLayoutParams();
         layoutParams.height=720;
-        layoutParams.width=864;
+        layoutParams.width=972;
         this.setLayoutParams(layoutParams);
     }
 

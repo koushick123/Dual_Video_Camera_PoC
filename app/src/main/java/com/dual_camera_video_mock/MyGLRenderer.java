@@ -54,6 +54,8 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
 
     private MyGLSurfaceView mView;
     private Context audioVideo;
+    int VIDEO_WIDTH=640;
+    int VIDEO_HEIGHT=480;
 
     MyGLRenderer( MyGLSurfaceView view, Context audVid ) {
         mView = view;
@@ -125,10 +127,10 @@ class MyGLRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         }
         Log.d(TAG,"Setting min and max Fps  == "+MIN_FPS+" , "+MAX_FPS);
         List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
-        for(int i=0;i<previewSizes.size();i++)
-        {
-            Log.d(TAG,"Preview size == "+previewSizes.get(i).height+", "+previewSizes.get(i).width);
-        }
+        VIDEO_HEIGHT = previewSizes.get(0).height;
+        VIDEO_WIDTH = previewSizes.get(0).width;
+        Log.d(TAG,"HEIGTH == "+VIDEO_HEIGHT+", WIDTH == "+VIDEO_WIDTH);
+        parameters.setPreviewSize(VIDEO_WIDTH,VIDEO_HEIGHT);
         parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
         mCamera.setParameters(parameters);
         showPreview();

@@ -35,13 +35,12 @@ public class AudioVideoRecording extends AppCompatActivity {
     private AudioRecord audioRecord;
     private MediaCodec mediaCodec;
     private volatile boolean isRecording=false;
-    int bufferSize=32;
     final static String MIME_TYPE = "audio/mp4a-latm";
     final static int SAMPLE_RATE = 44100;
     final static int BIT_RATE = 128000;
     public static final int SAMPLES_PER_FRAME = 1024;	// AAC, bytes/frame/channel
     public static final int FRAMES_PER_BUFFER = 25; 	// AAC, frame/buffer/sec
-    MediaFormat format;
+    MediaFormat format=null;
     int TIMEOUT = 10000;
     private final String TAG = this.getClass().getName();
 
@@ -77,7 +76,7 @@ public class AudioVideoRecording extends AppCompatActivity {
         LinearLayout topBar = new LinearLayout(this);
         LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT);
         layoutParams.height=720;
-        layoutParams.width=216;
+        layoutParams.width=108;
         topBar.setOrientation(LinearLayout.VERTICAL);
         topBar.setBackgroundColor(Color.BLACK);
         topBar.setLayoutParams(layoutParams);
@@ -85,12 +84,16 @@ public class AudioVideoRecording extends AppCompatActivity {
         //Bottom bar
         LinearLayout bottomBar = new LinearLayout(this);
         ImageButton cameraButton = new ImageButton(this);
-        cameraButton.setImageResource(R.drawable.ic_photo_camera);
+        cameraButton.setImageResource(R.drawable.ic_camera);
+        cameraButton.setPadding(0,0,100,0);
         bottomBar.setGravity(Gravity.CENTER);
         bottomBar.addView(cameraButton);
         bottomBar.setOrientation(LinearLayout.VERTICAL);
         bottomBar.setBackgroundColor(Color.BLACK);
-        bottomBar.setLayoutParams(layoutParams);
+        LinearLayout.LayoutParams layoutParams_bottom = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        layoutParams_bottom.height=720;
+        layoutParams_bottom.width=216;
+        bottomBar.setLayoutParams(layoutParams_bottom);
 
         cameraButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -126,17 +129,8 @@ public class AudioVideoRecording extends AppCompatActivity {
 
     private void setupAudioRecorder()
     {
-        final int min_buffer_size = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT);
-        int buffer_size = SAMPLES_PER_FRAME * FRAMES_PER_BUFFER;
-        if (buffer_size < min_buffer_size)
-            buffer_size = ((min_buffer_size / SAMPLES_PER_FRAME) + 1) * SAMPLES_PER_FRAME * 2;
-        Log.d(TAG,"Buffer size == "+buffer_size);
-        audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,AudioVideoRecording.SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT, buffer_size);
         try {
-            format = MediaFormat.createAudioFormat(AudioVideoRecording.MIME_TYPE,AudioVideoRecording.SAMPLE_RATE,1);
+            format = MediaFormat.createAudioFormat(AudioVideoRecording.MIME_TYPE, AudioVideoRecording.SAMPLE_RATE, 1);
             format.setInteger(MediaFormat.KEY_BIT_RATE,AudioVideoRecording.BIT_RATE);
             format.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
             format.setInteger(MediaFormat.KEY_CHANNEL_MASK, AudioFormat.CHANNEL_IN_MONO);
@@ -144,7 +138,48 @@ public class AudioVideoRecording extends AppCompatActivity {
             format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
             mediaCodec = MediaCodec.createEncoderByType(AudioVideoRecording.MIME_TYPE);
             mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            mediaCodec.start();
             isRecording=true;
+
+            int min_buffer_size = AudioRecord.getMinBufferSize(
+                    SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT);
+            Log.d(TAG,"MIN Buffer size == "+min_buffer_size);
+            int buffer_size = SAMPLES_PER_FRAME * FRAMES_PER_BUFFER;
+            if (buffer_size < min_buffer_size)
+                buffer_size = ((min_buffer_size / SAMPLES_PER_FRAME) + 1) * SAMPLES_PER_FRAME * 2;
+            Log.d(TAG,"Buffer size == "+buffer_size);
+            audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT, buffer_size);
+
+            Log.d(TAG,"Audio record state == "+audioRecord.getState());
+            if(audioRecord.getState() == 0)
+            {
+                final int[] AUDIO_SOURCES = new int[] {
+                MediaRecorder.AudioSource.DEFAULT,
+                        MediaRecorder.AudioSource.CAMCORDER,
+                        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            };
+                for(int audioSource : AUDIO_SOURCES)
+                {
+                    audioRecord = new AudioRecord(audioSource,SAMPLE_RATE ,
+                            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buffer_size);
+                    //Log.d(TAG,"Audio record state 2222 == "+audioRecord.getState());
+                    if(audioRecord.getState() == 1)
+                    {
+                        Log.d(TAG,"audioSource == "+audioSource);
+                        break;
+                    }
+                    audioRecord=null;
+                }
+            }
+            if(audioRecord == null || audioRecord.getState() == 0){
+                Toast.makeText(getApplicationContext(),"Audio record not supported in this device.",Toast.LENGTH_SHORT).show();
+                mediaCodec.stop();
+                mediaCodec.release();
+                return;
+            }
             Log.d(TAG,"Recording is now started == "+isRecording);
             Toast.makeText(getApplicationContext(),"Audio Record STARTED",Toast.LENGTH_SHORT).show();
             try {
@@ -164,7 +199,6 @@ public class AudioVideoRecording extends AppCompatActivity {
         public void run() {
             int len = 0, bufferIndex = 0;
             audioRecord.startRecording();
-            mediaCodec.start();
             final ByteBuffer[] inputBuffers = mediaCodec.getInputBuffers();
             Log.d(TAG,"Input buffer length == "+inputBuffers.length);
             MediaMuxer mediaMuxer = null;
