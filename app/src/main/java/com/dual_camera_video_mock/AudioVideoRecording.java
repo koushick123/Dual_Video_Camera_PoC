@@ -32,6 +32,7 @@ public class AudioVideoRecording extends AppCompatActivity {
 
     private MyGLSurfaceView cameraView;
     private int MY_PERMISSIONS_REQUEST_CAMERA=0;
+    private int MY_PERMISSIONS_REQUEST_AUDIO=1;
     private AudioRecord audioRecord;
     private MediaCodec mediaCodec;
     private volatile boolean isRecording=false;
@@ -42,12 +43,39 @@ public class AudioVideoRecording extends AppCompatActivity {
     public static final int FRAMES_PER_BUFFER = 25; 	// AAC, frame/buffer/sec
     MediaFormat format=null;
     int TIMEOUT = 10000;
+    static final String AUDIO_PERMISSION = "android.permission.RECORD_AUDIO";
+    static final String CAMERA_PERMISSION = "android.permission.CAMERA";
     private final String TAG = this.getClass().getName();
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         if(requestCode == MY_PERMISSIONS_REQUEST_CAMERA){
-            setupCameraPreview();
+            if(permissions!=null && permissions.length > 0){
+                Log.d(TAG,"For camera");
+                if(permissions[0].equalsIgnoreCase(CAMERA_PERMISSION)) {
+                    if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                        setupCameraPreview();
+                    } else {
+                        Toast.makeText(getApplicationContext(), "Camera Permission not given. App cannot show Camera preview.", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+            else {
+                Toast.makeText(getApplicationContext(), "Something wrong with obtaining Camera permissions. App cannot proceed with Camera preview", Toast.LENGTH_SHORT).show();
+            }
+        }
+        else if(requestCode == MY_PERMISSIONS_REQUEST_AUDIO){
+            if(permissions!=null && permissions.length > 0){
+                Log.d(TAG,"For audio");
+                if(!permissions[0].equalsIgnoreCase(AUDIO_PERMISSION)){
+                    if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_DENIED) {
+                        Toast.makeText(getApplicationContext(),"Audio Record Permission not given. App cannot record audio.",Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+            else{
+                Toast.makeText(getApplicationContext(),"Something wrong with obtaining Microphone permissions. App cannot proceed with Audio record.",Toast.LENGTH_SHORT).show();
+            }
         }
     }
 
@@ -62,6 +90,13 @@ public class AudioVideoRecording extends AppCompatActivity {
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.CAMERA},
                     MY_PERMISSIONS_REQUEST_CAMERA);
+        }
+
+        permission = ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.RECORD_AUDIO);
+        if(permission != PackageManager.PERMISSION_GRANTED){
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    MY_PERMISSIONS_REQUEST_AUDIO);
         }
     }
 
@@ -84,8 +119,8 @@ public class AudioVideoRecording extends AppCompatActivity {
         //Bottom bar
         LinearLayout bottomBar = new LinearLayout(this);
         ImageButton cameraButton = new ImageButton(this);
-        cameraButton.setImageResource(R.drawable.ic_camera);
-        cameraButton.setPadding(0,0,100,0);
+        cameraButton.setPadding(0,0,50,0);
+        cameraButton.setImageResource(R.drawable.ic_photo_camera);
         bottomBar.setGravity(Gravity.CENTER);
         bottomBar.addView(cameraButton);
         bottomBar.setOrientation(LinearLayout.VERTICAL);
@@ -111,19 +146,22 @@ public class AudioVideoRecording extends AppCompatActivity {
         parentLinearLayout.addView(topBar);
         parentLinearLayout.addView(cameraView);
         parentLinearLayout.addView(bottomBar);
+        //parentLinearLayout.addView(cameraButton);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(parentLinearLayout);
     }
 
     @Override
     protected void onPause() {
-        cameraView.onPause();
         super.onPause();
+        if(cameraView!=null)
+        cameraView.onPause();
     }
 
     @Override
     protected void onPostResume() {
         super.onPostResume();
+        if(cameraView!=null)
         cameraView.onResume();
     }
 
@@ -252,6 +290,7 @@ INNER_LOOP:             while(true) {
                             if (audioBufferInd >= 0) {
                                 if (bufferInfo.size != 0) {
                                     outputBuffers[audioBufferInd].position(bufferInfo.offset);
+                                    bufferInfo.presentationTimeUs=System.nanoTime()/1000;
                                     outputBuffers[audioBufferInd].limit(bufferInfo.offset + bufferInfo.size);
                                     Log.d(TAG, "Writing data size == " + bufferInfo.size);
                                     count+=bufferInfo.size;
