@@ -3,6 +3,8 @@ package com.dual_camera_video_mock;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.SurfaceTexture;
+import android.hardware.Camera;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaCodec;
@@ -10,6 +12,14 @@ import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.media.MediaRecorder;
+import android.opengl.EGL14;
+import android.opengl.EGLConfig;
+import android.opengl.EGLContext;
+import android.opengl.EGLDisplay;
+import android.opengl.EGLSurface;
+import android.opengl.GLES11Ext;
+import android.opengl.GLES20;
+import android.opengl.Matrix;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
@@ -17,6 +27,9 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -27,14 +40,76 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
+import java.util.Iterator;
+import java.util.List;
 
-public class AudioVideoRecording extends AppCompatActivity {
+public class AudioVideoRecording extends AppCompatActivity implements SurfaceHolder.Callback, SurfaceTexture.OnFrameAvailableListener{
 
-    private MyGLSurfaceView cameraView;
     private int MY_PERMISSIONS_REQUEST_CAMERA=0;
     private int MY_PERMISSIONS_REQUEST_AUDIO=1;
+
     private AudioRecord audioRecord;
     private MediaCodec mediaCodec;
+    private static int VIDEO_WIDTH = 1280;  // dimensions for 720p video
+    private static int VIDEO_HEIGHT = 720;
+    private SurfaceView cameraView;
+    SurfaceTexture surfaceTexture;
+    private Camera mCamera;
+    private EGLDisplay mEGLDisplay = EGL14.EGL_NO_DISPLAY;
+    private EGLContext mEGLContext = EGL14.EGL_NO_CONTEXT;
+    private EGLConfig mEGLConfig = null;
+    // Android-specific extension.
+    private static final int EGL_RECORDABLE_ANDROID = 0x3142;
+    public static final int FLAG_RECORDABLE = 0x01;
+    private int mProgramHandle;
+    private int mTextureTarget;
+    private int mTextureId;
+    private int muMVPMatrixLoc;
+    private int muTexMatrixLoc;
+    private int muKernelLoc;
+    private int muTexOffsetLoc;
+    private int muColorAdjustLoc;
+    private int maPositionLoc;
+    private int maTextureCoordLoc;
+    private float[] mKernel = new float[KERNEL_SIZE];
+    private float[] mTexOffset;
+    private float mColorAdjust;
+    public static final int KERNEL_SIZE = 9;
+    //Surface onto which camera frames are drawn
+    EGLSurface eglSurface;
+    //Surface to which camera frames are sent for encoding to mp4 format
+    EGLSurface encoderSurface;
+    private final float[] mTmpMatrix = new float[16];
+    public static final float[] IDENTITY_MATRIX;
+    static {
+        IDENTITY_MATRIX = new float[16];
+        Matrix.setIdentityM(IDENTITY_MATRIX, 0);
+    }
+
+    // Simple vertex shader, used for all programs.
+    private static final String VERTEX_SHADER =
+            "uniform mat4 uMVPMatrix;\n" +
+                    "uniform mat4 uTexMatrix;\n" +
+                    "attribute vec4 aPosition;\n" +
+                    "attribute vec4 aTextureCoord;\n" +
+                    "varying vec2 vTextureCoord;\n" +
+                    "void main() {\n" +
+                    "    gl_Position = uMVPMatrix * aPosition;\n" +
+                    "    vTextureCoord = (uTexMatrix * aTextureCoord).xy;\n" +
+                    "}\n";
+
+    // Simple fragment shader for use with external 2D textures (e.g. what we get from
+    // SurfaceTexture).
+    private static final String FRAGMENT_SHADER_EXT =
+            "#extension GL_OES_EGL_image_external : require\n" +
+                    "precision mediump float;\n" +
+                    "varying vec2 vTextureCoord;\n" +
+                    "uniform samplerExternalOES sTexture;\n" +
+                    "void main() {\n" +
+                    "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
+                    "}\n";
+
     private volatile boolean isRecording=false;
     final static String MIME_TYPE = "audio/mp4a-latm";
     final static int SAMPLE_RATE = 44100;
@@ -43,6 +118,7 @@ public class AudioVideoRecording extends AppCompatActivity {
     public static final int FRAMES_PER_BUFFER = 25; 	// AAC, frame/buffer/sec
     MediaFormat format=null;
     int TIMEOUT = 10000;
+
     static final String AUDIO_PERMISSION = "android.permission.RECORD_AUDIO";
     static final String CAMERA_PERMISSION = "android.permission.CAMERA";
     private final String TAG = this.getClass().getName();
@@ -84,7 +160,9 @@ public class AudioVideoRecording extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         int permission = ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.CAMERA);
         if(permission == PackageManager.PERMISSION_GRANTED) {
-            setupCameraPreview();
+            SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
+            SurfaceHolder sh = sv.getHolder();
+            sh.addCallback(this);
         }
         else{
             ActivityCompat.requestPermissions(this,
@@ -103,7 +181,6 @@ public class AudioVideoRecording extends AppCompatActivity {
     private void setupCameraPreview()
     {
         getSupportActionBar().hide();
-        cameraView = new MyGLSurfaceView(this);
         LinearLayout parentLinearLayout = new LinearLayout(this);
         parentLinearLayout.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -144,9 +221,7 @@ public class AudioVideoRecording extends AppCompatActivity {
         });
         //Add them to parent
         parentLinearLayout.addView(topBar);
-        parentLinearLayout.addView(cameraView);
         parentLinearLayout.addView(bottomBar);
-        //parentLinearLayout.addView(cameraButton);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(parentLinearLayout);
     }
@@ -154,15 +229,71 @@ public class AudioVideoRecording extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        if(cameraView!=null)
-        cameraView.onPause();
+        releaseCamera();
     }
 
     @Override
-    protected void onPostResume() {
-        super.onPostResume();
-        if(cameraView!=null)
-        cameraView.onResume();
+    protected void onResume() {
+        super.onResume();
+        setupCamera();
+    }
+
+    private void releaseCamera() {
+        if (mCamera != null) {
+            mCamera.stopPreview();
+            mCamera.release();
+            mCamera = null;
+            Log.d(TAG, "releaseCamera -- done");
+        }
+    }
+
+    private void setupCamera()
+    {
+        Camera.CameraInfo info = new Camera.CameraInfo();
+        for(int i=0;i<Camera.getNumberOfCameras();i++)
+        {
+            Camera.getCameraInfo(i, info);
+            if(info.facing == Camera.CameraInfo.CAMERA_FACING_BACK){
+                mCamera = Camera.open(i);
+                break;
+            }
+        }
+
+        Camera.Parameters parameters = mCamera.getParameters();
+        List<int[]> fps = parameters.getSupportedPreviewFpsRange();
+        Iterator<int[]> iter = fps.iterator();
+        //Safe to assume every camera would support 15 fps.
+        int MIN_FPS = 15;
+        int MAX_FPS = 15;
+        while(iter.hasNext())
+        {
+            int[] frames = iter.next();
+            if(!iter.hasNext())
+            {
+                MIN_FPS = frames[0];
+                MAX_FPS = frames[1];
+            }
+        }
+        Log.d(TAG,"Setting min and max Fps  == "+MIN_FPS+" , "+MAX_FPS);
+        List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
+        VIDEO_HEIGHT = previewSizes.get(0).height;
+        VIDEO_WIDTH = previewSizes.get(0).width;
+        Log.d(TAG,"HEIGTH == "+VIDEO_HEIGHT+", WIDTH == "+VIDEO_WIDTH);
+        parameters.setPreviewSize(VIDEO_WIDTH,VIDEO_HEIGHT);
+        parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
+        parameters.setRecordingHint(true);
+        mCamera.setParameters(parameters);
+    }
+
+    private void showPreview()
+    {
+        Log.d(TAG, "starting camera preview");
+        try {
+            mCamera.setPreviewTexture(surfaceTexture);
+        } catch (IOException ioe) {
+            throw new RuntimeException(ioe);
+        }
+        mCamera.startPreview();
     }
 
     private void setupAudioRecorder()
@@ -203,7 +334,6 @@ public class AudioVideoRecording extends AppCompatActivity {
                 {
                     audioRecord = new AudioRecord(audioSource,SAMPLE_RATE ,
                             AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buffer_size);
-                    //Log.d(TAG,"Audio record state 2222 == "+audioRecord.getState());
                     if(audioRecord.getState() == 1)
                     {
                         Log.d(TAG,"audioSource == "+audioSource);
@@ -229,6 +359,236 @@ public class AudioVideoRecording extends AppCompatActivity {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    @Override
+    public void surfaceCreated(SurfaceHolder surfaceHolder) {
+        Log.d(TAG, "surfCreated holder" + surfaceHolder);
+        prepareEGLDisplayandContext();
+        prepareWindowSurface(surfaceHolder.getSurface());
+
+        muMVPMatrixLoc = GLES20.glGetUniformLocation(mProgramHandle, "uMVPMatrix");
+        GlUtil.checkLocation(muMVPMatrixLoc, "uMVPMatrix");
+        mTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES;
+        mProgramHandle = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER_EXT);
+        mTextureId = createGLTextureObject();
+        surfaceTexture = new SurfaceTexture(mTextureId);
+        surfaceTexture.setOnFrameAvailableListener(this);
+        showPreview();
+    }
+
+    @Override
+    public void surfaceChanged(SurfaceHolder surfaceHolder, int i, int i1, int i2) {
+
+    }
+
+    @Override
+    public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
+        Log.d(TAG, "surfaceDestroyed holder=" + surfaceHolder);
+    }
+
+    @Override
+    public void onFrameAvailable(SurfaceTexture surfaceTexture) {
+        makeCurrent();
+        //Get next frame from camera
+        surfaceTexture.updateTexImage();
+        surfaceTexture.getTransformMatrix(mTmpMatrix);
+
+        //Fill the surfaceview with Camera frame
+        SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
+        int viewWidth = sv.getWidth();
+        int viewHeight = sv.getHeight();
+        GLES20.glViewport(0, 0, viewWidth, viewHeight);
+    }
+
+    private void makeCurrent()
+    {
+        if (!EGL14.eglMakeCurrent(mEGLDisplay, eglSurface, eglSurface, mEGLContext)) {
+            throw new RuntimeException("eglMakeCurrent failed");
+        }
+    }
+    /**
+     * Creates a texture object suitable for use with this program.
+     * <p>
+     * On exit, the texture will be bound.
+     */
+    public int createGLTextureObject() {
+        int[] textures = new int[1];
+        GLES20.glGenTextures(1, textures, 0);
+        GlUtil.checkGlError("glGenTextures");
+
+        int texId = textures[0];
+        GLES20.glBindTexture(mTextureTarget, texId);
+        GlUtil.checkGlError("glBindTexture " + texId);
+
+        GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER,
+                GLES20.GL_NEAREST);
+        GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER,
+                GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S,
+                GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T,
+                GLES20.GL_CLAMP_TO_EDGE);
+        GlUtil.checkGlError("glTexParameter");
+
+        return texId;
+    }
+
+    private void prepareEGLDisplayandContext()
+    {
+        mEGLDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
+        if (mEGLDisplay == EGL14.EGL_NO_DISPLAY) {
+            throw new RuntimeException("unable to get EGL14 display");
+        }
+        int[] version = new int[2];
+        if (!EGL14.eglInitialize(mEGLDisplay, version, 0, version, 1)) {
+            mEGLDisplay = null;
+            throw new RuntimeException("unable to initialize EGL14");
+        }
+        EGLConfig config = getConfig(FLAG_RECORDABLE, 2);
+        if (config == null) {
+            throw new RuntimeException("Unable to find a suitable EGLConfig");
+        }
+        int[] attrib2_list = {
+                EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
+                EGL14.EGL_NONE
+        };
+        EGLContext context = EGL14.eglCreateContext(mEGLDisplay, config, EGL14.EGL_NO_CONTEXT,
+                attrib2_list, 0);
+        checkEglError("eglCreateContext");
+        mEGLConfig = config;
+        mEGLContext = context;
+
+        // Confirm with query.
+        int[] values = new int[1];
+        EGL14.eglQueryContext(mEGLDisplay, mEGLContext, EGL14.EGL_CONTEXT_CLIENT_VERSION,
+                values, 0);
+        Log.d(TAG, "EGLContext created, client version " + values[0]);
+    }
+
+    private void checkEglError(String msg) {
+        int error;
+        if ((error = EGL14.eglGetError()) != EGL14.EGL_SUCCESS) {
+            throw new RuntimeException(msg + ": EGL error: 0x" + Integer.toHexString(error));
+        }
+    }
+
+    private void prepareWindowSurface(Surface surface)
+    {
+        // Create a window surface, and attach it to the Surface we received.
+        int[] surfaceAttribs = {
+                EGL14.EGL_NONE
+        };
+        eglSurface = EGL14.eglCreateWindowSurface(mEGLDisplay, mEGLConfig,surface ,
+                surfaceAttribs, 0);
+        checkEglError("eglCreateWindowSurface");
+        if (eglSurface == null) {
+            throw new RuntimeException("surface was null");
+        }
+        makeCurrent();
+    }
+
+    /**
+     * Issues the draw call.  Does the full setup on every call.
+     *
+     * @param mvpMatrix The 4x4 projection matrix.
+     * @param vertexBuffer Buffer with vertex position data.
+     * @param firstVertex Index of first vertex to use in vertexBuffer.
+     * @param vertexCount Number of vertices in vertexBuffer.
+     * @param coordsPerVertex The number of coordinates per vertex (e.g. x,y is 2).
+     * @param vertexStride Width, in bytes, of the position data for each vertex (often
+     *        vertexCount * sizeof(float)).
+     * @param texMatrix A 4x4 transformation matrix for texture coords.  (Primarily intended
+     *        for use with SurfaceTexture.)
+     * @param texBuffer Buffer with vertex texture data.
+     * @param texStride Width, in bytes, of the texture data for each vertex.
+     */
+    private void draw(float[] mvpMatrix, FloatBuffer vertexBuffer, int firstVertex,
+                     int vertexCount, int coordsPerVertex, int vertexStride,
+                     float[] texMatrix, FloatBuffer texBuffer, int textureId, int texStride) {
+        GlUtil.checkGlError("draw start");
+
+        // Select the program.
+        GLES20.glUseProgram(mProgramHandle);
+        GlUtil.checkGlError("glUseProgram");
+
+        // Set the texture.
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(mTextureTarget, textureId);
+
+        // Copy the model / view / projection matrix over.
+        GLES20.glUniformMatrix4fv(muMVPMatrixLoc, 1, false, mvpMatrix, 0);
+        GlUtil.checkGlError("glUniformMatrix4fv");
+
+        // Copy the texture transformation matrix over.
+        GLES20.glUniformMatrix4fv(muTexMatrixLoc, 1, false, texMatrix, 0);
+        GlUtil.checkGlError("glUniformMatrix4fv");
+
+        // Enable the "aPosition" vertex attribute.
+        GLES20.glEnableVertexAttribArray(maPositionLoc);
+        GlUtil.checkGlError("glEnableVertexAttribArray");
+
+        // Connect vertexBuffer to "aPosition".
+        GLES20.glVertexAttribPointer(maPositionLoc, coordsPerVertex,
+                GLES20.GL_FLOAT, false, vertexStride, vertexBuffer);
+        GlUtil.checkGlError("glVertexAttribPointer");
+
+        // Enable the "aTextureCoord" vertex attribute.
+        GLES20.glEnableVertexAttribArray(maTextureCoordLoc);
+        GlUtil.checkGlError("glEnableVertexAttribArray");
+
+        // Connect texBuffer to "aTextureCoord".
+        GLES20.glVertexAttribPointer(maTextureCoordLoc, 2,
+                GLES20.GL_FLOAT, false, texStride, texBuffer);
+        GlUtil.checkGlError("glVertexAttribPointer");
+
+        // Populate the convolution kernel, if present.
+        if (muKernelLoc >= 0) {
+            GLES20.glUniform1fv(muKernelLoc, KERNEL_SIZE, mKernel, 0);
+            GLES20.glUniform2fv(muTexOffsetLoc, KERNEL_SIZE, mTexOffset, 0);
+            GLES20.glUniform1f(muColorAdjustLoc, mColorAdjust);
+        }
+
+        // Draw the rect.
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, firstVertex, vertexCount);
+        GlUtil.checkGlError("glDrawArrays");
+
+        // Done -- disable vertex array, texture, and program.
+        GLES20.glDisableVertexAttribArray(maPositionLoc);
+        GLES20.glDisableVertexAttribArray(maTextureCoordLoc);
+        GLES20.glBindTexture(mTextureTarget, 0);
+        GLES20.glUseProgram(0);
+    }
+
+    private EGLConfig getConfig(int flags, int version) {
+        int renderableType = EGL14.EGL_OPENGL_ES2_BIT;
+
+        // The actual surface is generally RGBA or RGBX, so situationally omitting alpha
+        // doesn't really help.  It can also lead to a huge performance hit on glReadPixels()
+        // when reading into a GL_RGBA buffer.
+        int[] attribList = {
+                EGL14.EGL_RED_SIZE, 8,
+                EGL14.EGL_GREEN_SIZE, 8,
+                EGL14.EGL_BLUE_SIZE, 8,
+                EGL14.EGL_ALPHA_SIZE, 8,
+                //EGL14.EGL_DEPTH_SIZE, 16,
+                //EGL14.EGL_STENCIL_SIZE, 8,
+                EGL14.EGL_RENDERABLE_TYPE, renderableType,
+                EGL14.EGL_NONE, 0,      // placeholder for recordable [@-3]
+                EGL14.EGL_NONE
+        };
+        if ((flags & FLAG_RECORDABLE) != 0) {
+            attribList[attribList.length - 3] = EGL_RECORDABLE_ANDROID;
+            attribList[attribList.length - 2] = 1;
+        }
+        EGLConfig[] configs = new EGLConfig[1];
+        int[] numConfigs = new int[1];
+        if (!EGL14.eglChooseConfig(mEGLDisplay, attribList, 0, configs, 0, configs.length,
+                numConfigs, 0)) {
+            Log.w(TAG, "unable to find RGB8888 / " + version + " EGLConfig");
+            return null;
+        }
+        return configs[0];
     }
 
     class RecordAudio extends Thread
