@@ -40,6 +40,7 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.Iterator;
 import java.util.List;
@@ -66,6 +67,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     private int mTextureTarget;
     private int mTextureId;
     private int muMVPMatrixLoc;
+    private static final int SIZEOF_FLOAT = 4;
     private int muTexMatrixLoc;
     private int muKernelLoc;
     private int muTexOffsetLoc;
@@ -75,6 +77,25 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     private float[] mKernel = new float[KERNEL_SIZE];
     private float[] mTexOffset;
     private float mColorAdjust;
+    /**
+     * A "full" square, extending from -1 to +1 in both dimensions.  When the model/view/projection
+     * matrix is identity, this will exactly cover the viewport.
+     * <p>
+     * The texture coordinates are Y-inverted relative to RECTANGLE.  (This seems to work out
+     * right with external textures from SurfaceTexture.)
+     */
+    private static final float FULL_RECTANGLE_COORDS[] = {
+            -1.0f, -1.0f,   // 0 bottom left
+            1.0f, -1.0f,   // 1 bottom right
+            -1.0f,  1.0f,   // 2 top left
+            1.0f,  1.0f,   // 3 top right
+    };
+    private static final float FULL_RECTANGLE_TEX_COORDS[] = {
+            0.0f, 0.0f,     // 0 bottom left
+            1.0f, 0.0f,     // 1 bottom right
+            0.0f, 1.0f,     // 2 top left
+            1.0f, 1.0f      // 3 top right
+    };
     public static final int KERNEL_SIZE = 9;
     //Surface onto which camera frames are drawn
     EGLSurface eglSurface;
@@ -130,6 +151,9 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                 Log.d(TAG,"For camera");
                 if(permissions[0].equalsIgnoreCase(CAMERA_PERMISSION)) {
                     if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                        SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
+                        SurfaceHolder sh = sv.getHolder();
+                        sh.addCallback(this);
                         setupCameraPreview();
                     } else {
                         Toast.makeText(getApplicationContext(), "Camera Permission not given. App cannot show Camera preview.", Toast.LENGTH_SHORT).show();
@@ -158,11 +182,15 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_audio_video_recording);
+        getSupportActionBar().hide();
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         int permission = ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.CAMERA);
         if(permission == PackageManager.PERMISSION_GRANTED) {
             SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
             SurfaceHolder sh = sv.getHolder();
             sh.addCallback(this);
+            //setupCameraPreview();
         }
         else{
             ActivityCompat.requestPermissions(this,
@@ -230,6 +258,12 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     protected void onPause() {
         super.onPause();
         releaseCamera();
+        if(surfaceTexture!=null){
+            surfaceTexture.release();
+        }
+        releaseEGLSurface();
+        releaseProgram();
+        releaseEGLContext();
     }
 
     @Override
@@ -245,6 +279,29 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             mCamera = null;
             Log.d(TAG, "releaseCamera -- done");
         }
+    }
+
+    private void releaseEGLSurface(){
+        EGL14.eglDestroySurface(mEGLDisplay,eglSurface);
+    }
+
+    private void releaseProgram(){
+        GLES20.glDeleteProgram(mProgramHandle);
+    }
+
+    private void releaseEGLContext()
+    {
+        if (mEGLDisplay != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglMakeCurrent(mEGLDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE,
+                    EGL14.EGL_NO_CONTEXT);
+            EGL14.eglDestroyContext(mEGLDisplay, mEGLContext);
+            EGL14.eglReleaseThread();
+            EGL14.eglTerminate(mEGLDisplay);
+        }
+
+        mEGLDisplay = EGL14.EGL_NO_DISPLAY;
+        mEGLContext = EGL14.EGL_NO_CONTEXT;
+        mEGLConfig = null;
     }
 
     private void setupCamera()
@@ -363,23 +420,82 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
     @Override
     public void surfaceCreated(SurfaceHolder surfaceHolder) {
-        Log.d(TAG, "surfCreated holder" + surfaceHolder);
+        Log.d(TAG, "surfCreated holder = " + surfaceHolder);
         prepareEGLDisplayandContext();
         prepareWindowSurface(surfaceHolder.getSurface());
 
+        mProgramHandle = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER_EXT);
+
         muMVPMatrixLoc = GLES20.glGetUniformLocation(mProgramHandle, "uMVPMatrix");
         GlUtil.checkLocation(muMVPMatrixLoc, "uMVPMatrix");
+        maPositionLoc = GLES20.glGetAttribLocation(mProgramHandle, "aPosition");
+        GlUtil.checkLocation(maPositionLoc, "aPosition");
+        maTextureCoordLoc = GLES20.glGetAttribLocation(mProgramHandle, "aTextureCoord");
+        GlUtil.checkLocation(maTextureCoordLoc, "aTextureCoord");
+        muMVPMatrixLoc = GLES20.glGetUniformLocation(mProgramHandle, "uMVPMatrix");
+        GlUtil.checkLocation(muMVPMatrixLoc, "uMVPMatrix");
+        muTexMatrixLoc = GLES20.glGetUniformLocation(mProgramHandle, "uTexMatrix");
+        GlUtil.checkLocation(muTexMatrixLoc, "uTexMatrix");
+        /*muKernelLoc = GLES20.glGetUniformLocation(mProgramHandle, "uKernel");
+        if (muKernelLoc < 0) {
+            // no kernel in this one
+            muKernelLoc = -1;
+            muTexOffsetLoc = -1;
+            muColorAdjustLoc = -1;
+        } else {
+            // has kernel, must also have tex offset and color adj
+            muTexOffsetLoc = GLES20.glGetUniformLocation(mProgramHandle, "uTexOffset");
+            GlUtil.checkLocation(muTexOffsetLoc, "uTexOffset");
+            muColorAdjustLoc = GLES20.glGetUniformLocation(mProgramHandle, "uColorAdjust");
+            GlUtil.checkLocation(muColorAdjustLoc, "uColorAdjust");
+
+            // initialize default values
+            setKernel(new float[] {0f, 0f, 0f,  0f, 1f, 0f,  0f, 0f, 0f}, 0f);
+            setTexSize(256, 256);
+        }*/
+
         mTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES;
-        mProgramHandle = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER_EXT);
         mTextureId = createGLTextureObject();
         surfaceTexture = new SurfaceTexture(mTextureId);
         surfaceTexture.setOnFrameAvailableListener(this);
         showPreview();
     }
 
-    @Override
-    public void surfaceChanged(SurfaceHolder surfaceHolder, int i, int i1, int i2) {
+    /**
+     * Configures the convolution filter values.
+     *
+     * @param values Normalized filter values; must be KERNEL_SIZE elements.
+     */
+    /*public void setKernel(float[] values, float colorAdj) {
+        if (values.length != KERNEL_SIZE) {
+            throw new IllegalArgumentException("Kernel size is " + values.length +
+                    " vs. " + KERNEL_SIZE);
+        }
+        System.arraycopy(values, 0, mKernel, 0, KERNEL_SIZE);
+        mColorAdjust = colorAdj;
+        //Log.d(TAG, "filt kernel: " + Arrays.toString(mKernel) + ", adj=" + colorAdj);
+    }
 
+    *//**
+     * Sets the size of the texture.  This is used to find adjacent texels when filtering.
+     *//*
+    public void setTexSize(int width, int height) {
+        float rw = 1.0f / width;
+        float rh = 1.0f / height;
+
+        // Don't need to create a new array here, but it's syntactically convenient.
+        mTexOffset = new float[] {
+                -rw, -rh,   0f, -rh,    rw, -rh,
+                -rw, 0f,    0f, 0f,     rw, 0f,
+                -rw, rh,    0f, rh,     rw, rh
+        };
+        //Log.d(TAG, "filt size: " + width + "x" + height + ": " + Arrays.toString(mTexOffset));
+    }*/
+
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        Log.d(TAG, "surfaceChanged fmt=" + format + " size=" + width + "x" + height +
+                " holder=" + holder);
     }
 
     @Override
@@ -389,23 +505,43 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        makeCurrent();
-        //Get next frame from camera
-        surfaceTexture.updateTexImage();
-        surfaceTexture.getTransformMatrix(mTmpMatrix);
+        //If camera is being released, don't do anything.
+        if(mCamera!=null) {
+            makeCurrent();
+            //Get next frame from camera
+            surfaceTexture.updateTexImage();
+            surfaceTexture.getTransformMatrix(mTmpMatrix);
 
-        //Fill the surfaceview with Camera frame
-        SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
-        int viewWidth = sv.getWidth();
-        int viewHeight = sv.getHeight();
-        GLES20.glViewport(0, 0, viewWidth, viewHeight);
+            //Fill the surfaceview with Camera frame
+            SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
+            int viewWidth = sv.getWidth();
+            int viewHeight = sv.getHeight();
+            Log.d(TAG, "Surface View Height == " + viewHeight + " , Width == " + viewWidth);
+            GLES20.glViewport(0, 0, viewWidth,viewHeight);
+            draw(IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
+                    createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
+
+            //Calls eglSwapBuffers.  Use this to "publish" the current frame.
+            EGL14.eglSwapBuffers(mEGLDisplay, eglSurface);
+        }
+    }
+
+    /**
+     * Allocates a direct float buffer, and populates it with the float array data.
+     */
+    private FloatBuffer createFloatBuffer(float[] coords) {
+        // Allocate a direct ByteBuffer, using 4 bytes per float, and copy coords into it.
+        ByteBuffer bb = ByteBuffer.allocateDirect(coords.length * SIZEOF_FLOAT);
+        bb.order(ByteOrder.nativeOrder());
+        FloatBuffer fb = bb.asFloatBuffer();
+        fb.put(coords);
+        fb.position(0);
+        return fb;
     }
 
     private void makeCurrent()
     {
-        if (!EGL14.eglMakeCurrent(mEGLDisplay, eglSurface, eglSurface, mEGLContext)) {
-            throw new RuntimeException("eglMakeCurrent failed");
-        }
+        EGL14.eglMakeCurrent(mEGLDisplay, eglSurface, eglSurface, mEGLContext);
     }
     /**
      * Creates a texture object suitable for use with this program.
@@ -542,12 +678,12 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                 GLES20.GL_FLOAT, false, texStride, texBuffer);
         GlUtil.checkGlError("glVertexAttribPointer");
 
-        // Populate the convolution kernel, if present.
+        /*// Populate the convolution kernel, if present.
         if (muKernelLoc >= 0) {
             GLES20.glUniform1fv(muKernelLoc, KERNEL_SIZE, mKernel, 0);
             GLES20.glUniform2fv(muTexOffsetLoc, KERNEL_SIZE, mTexOffset, 0);
             GLES20.glUniform1f(muColorAdjustLoc, mColorAdjust);
-        }
+        }*/
 
         // Draw the rect.
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, firstVertex, vertexCount);
