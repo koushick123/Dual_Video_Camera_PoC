@@ -132,7 +132,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     final static int BIT_RATE = 128000;
     public static final int SAMPLES_PER_FRAME = 1024;	// AAC, bytes/frame/channel
     public static final int FRAMES_PER_BUFFER = 25; 	// AAC, frame/buffer/sec
-    MediaFormat format=null;
+    MediaFormat audioFormat=null;
     int TIMEOUT = 10000;
 
     static final String AUDIO_PERMISSION = "android.permission.RECORD_AUDIO";
@@ -178,6 +178,24 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_audio_video_recording);
         cameraView = (SurfaceView) findViewById(R.id.cameraView);
+        final ImageButton recordButton = (ImageButton)findViewById(R.id.record_button);
+        recordButton.setColorFilter(Color.DKGRAY);
+        recordButton.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view)
+            {
+                if(!isRecording){
+                    isRecording=true;
+                    recordButton.setColorFilter(Color.RED);
+                    //Record here
+                }
+                else{
+                    isRecording=false;
+                    recordButton.setColorFilter(Color.DKGRAY);
+                    //Stop here
+                }
+            }
+        });
         getSupportActionBar().hide();
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         checkForPermissions();
@@ -224,7 +242,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         LinearLayout bottomBar = new LinearLayout(this);
         ImageButton cameraButton = new ImageButton(this);
         cameraButton.setPadding(0,0,50,0);
-        cameraButton.setImageResource(R.drawable.ic_photo_camera);
+        //cameraButton.setImageResource(R.drawable.ic_photo_camera);
         bottomBar.setGravity(Gravity.CENTER);
         bottomBar.addView(cameraButton);
         bottomBar.setOrientation(LinearLayout.VERTICAL);
@@ -372,17 +390,22 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         mCamera.startPreview();
     }
 
+    private void setupVideoRecorder()
+    {
+
+    }
+
     private void setupAudioRecorder()
     {
         try {
-            format = MediaFormat.createAudioFormat(AudioVideoRecording.MIME_TYPE, AudioVideoRecording.SAMPLE_RATE, 1);
-            format.setInteger(MediaFormat.KEY_BIT_RATE,AudioVideoRecording.BIT_RATE);
-            format.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
-            format.setInteger(MediaFormat.KEY_CHANNEL_MASK, AudioFormat.CHANNEL_IN_MONO);
-            format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
+            audioFormat = MediaFormat.createAudioFormat(AudioVideoRecording.MIME_TYPE, AudioVideoRecording.SAMPLE_RATE, 1);
+            audioFormat.setInteger(MediaFormat.KEY_BIT_RATE,AudioVideoRecording.BIT_RATE);
+            audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
+            audioFormat.setInteger(MediaFormat.KEY_CHANNEL_MASK, AudioFormat.CHANNEL_IN_MONO);
+            audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+            audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
             mediaCodec = MediaCodec.createEncoderByType(AudioVideoRecording.MIME_TYPE);
-            mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            mediaCodec.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             mediaCodec.start();
             isRecording=true;
 
@@ -734,7 +757,7 @@ MAIN_LOOP:                while (true) {
                     }
                     else if(bufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){
                         Log.d(TAG,"Output format changed");
-                        format = mediaCodec.getOutputFormat();
+                        audioFormat = mediaCodec.getOutputFormat();
                     }
 
                     if (bufferIndex>=0 && !isEOS) {
@@ -775,8 +798,8 @@ INNER_LOOP:             while(true) {
                                 outputBuffers = mediaCodec.getOutputBuffers();
                             } else if (audioBufferInd == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                                 // Subsequent data will conform to new format.
-                                format = mediaCodec.getOutputFormat();
-                                trackIndex = mediaMuxer.addTrack(format);
+                                audioFormat = mediaCodec.getOutputFormat();
+                                trackIndex = mediaMuxer.addTrack(audioFormat);
                                 mediaMuxer.start();
                             } else if (audioBufferInd == MediaCodec.INFO_TRY_AGAIN_LATER) {
                                 if (!isEOS) {
