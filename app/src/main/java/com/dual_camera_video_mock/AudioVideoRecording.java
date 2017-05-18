@@ -25,6 +25,7 @@ import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.Surface;
@@ -68,15 +69,10 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     private int mTextureId;
     private int muMVPMatrixLoc;
     private static final int SIZEOF_FLOAT = 4;
+    int frameCount=0;
     private int muTexMatrixLoc;
-    private int muKernelLoc;
-    private int muTexOffsetLoc;
-    private int muColorAdjustLoc;
     private int maPositionLoc;
     private int maTextureCoordLoc;
-    private float[] mKernel = new float[KERNEL_SIZE];
-    private float[] mTexOffset;
-    private float mColorAdjust;
     /**
      * A "full" square, extending from -1 to +1 in both dimensions.  When the model/view/projection
      * matrix is identity, this will exactly cover the viewport.
@@ -96,7 +92,6 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             0.0f, 1.0f,     // 2 top left
             1.0f, 1.0f      // 3 top right
     };
-    public static final int KERNEL_SIZE = 9;
     //Surface onto which camera frames are drawn
     EGLSurface eglSurface;
     //Surface to which camera frames are sent for encoding to mp4 format
@@ -151,10 +146,9 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                 Log.d(TAG,"For camera");
                 if(permissions[0].equalsIgnoreCase(CAMERA_PERMISSION)) {
                     if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                        SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
-                        SurfaceHolder sh = sv.getHolder();
+                        SurfaceHolder sh = cameraView.getHolder();
                         sh.addCallback(this);
-                        setupCameraPreview();
+                        //setupCameraPreview();
                     } else {
                         Toast.makeText(getApplicationContext(), "Camera Permission not given. App cannot show Camera preview.", Toast.LENGTH_SHORT).show();
                     }
@@ -183,12 +177,17 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_audio_video_recording);
+        cameraView = (SurfaceView) findViewById(R.id.cameraView);
         getSupportActionBar().hide();
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        checkForPermissions();
+    }
+
+    private void checkForPermissions()
+    {
         int permission = ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.CAMERA);
         if(permission == PackageManager.PERMISSION_GRANTED) {
-            SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
-            SurfaceHolder sh = sv.getHolder();
+            SurfaceHolder sh = cameraView.getHolder();
             sh.addCallback(this);
             //setupCameraPreview();
         }
@@ -269,6 +268,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     @Override
     protected void onResume() {
         super.onResume();
+
         setupCamera();
     }
 
@@ -332,9 +332,28 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             }
         }
         Log.d(TAG,"Setting min and max Fps  == "+MIN_FPS+" , "+MAX_FPS);
+        DisplayMetrics metrics = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(metrics);
+        Log.d(TAG,"Width = "+metrics.widthPixels);
+        Log.d(TAG,"Height = "+metrics.heightPixels);
+        Log.d(TAG,"SCREEN Aspect Ratio = "+(double)metrics.widthPixels/(double)metrics.heightPixels);
+        double screenAspectRatio = (double)metrics.widthPixels/(double)metrics.heightPixels;
         List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
+
+        //If none of the camera preview size will (closely) match with screen resolution, default it, to take the first preview size value.
         VIDEO_HEIGHT = previewSizes.get(0).height;
         VIDEO_WIDTH = previewSizes.get(0).width;
+        for(int i = 0;i<previewSizes.size();i++)
+        {
+            double ar = (double)previewSizes.get(i).width/(double)previewSizes.get(i).height;
+            Log.d(TAG,"Aspect ratio for "+previewSizes.get(i).width+" / "+previewSizes.get(i).height+" is = "+ar);
+            if(Math.abs(screenAspectRatio - ar) <= 0.2){
+                //Best match for camera preview!!
+                VIDEO_HEIGHT = previewSizes.get(i).height;
+                VIDEO_WIDTH = previewSizes.get(i).width;
+                break;
+            }
+        }
         Log.d(TAG,"HEIGTH == "+VIDEO_HEIGHT+", WIDTH == "+VIDEO_WIDTH);
         parameters.setPreviewSize(VIDEO_WIDTH,VIDEO_HEIGHT);
         parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
@@ -436,61 +455,12 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         GlUtil.checkLocation(muMVPMatrixLoc, "uMVPMatrix");
         muTexMatrixLoc = GLES20.glGetUniformLocation(mProgramHandle, "uTexMatrix");
         GlUtil.checkLocation(muTexMatrixLoc, "uTexMatrix");
-        /*muKernelLoc = GLES20.glGetUniformLocation(mProgramHandle, "uKernel");
-        if (muKernelLoc < 0) {
-            // no kernel in this one
-            muKernelLoc = -1;
-            muTexOffsetLoc = -1;
-            muColorAdjustLoc = -1;
-        } else {
-            // has kernel, must also have tex offset and color adj
-            muTexOffsetLoc = GLES20.glGetUniformLocation(mProgramHandle, "uTexOffset");
-            GlUtil.checkLocation(muTexOffsetLoc, "uTexOffset");
-            muColorAdjustLoc = GLES20.glGetUniformLocation(mProgramHandle, "uColorAdjust");
-            GlUtil.checkLocation(muColorAdjustLoc, "uColorAdjust");
-
-            // initialize default values
-            setKernel(new float[] {0f, 0f, 0f,  0f, 1f, 0f,  0f, 0f, 0f}, 0f);
-            setTexSize(256, 256);
-        }*/
-
         mTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES;
         mTextureId = createGLTextureObject();
         surfaceTexture = new SurfaceTexture(mTextureId);
         surfaceTexture.setOnFrameAvailableListener(this);
         showPreview();
     }
-
-    /**
-     * Configures the convolution filter values.
-     *
-     * @param values Normalized filter values; must be KERNEL_SIZE elements.
-     */
-    /*public void setKernel(float[] values, float colorAdj) {
-        if (values.length != KERNEL_SIZE) {
-            throw new IllegalArgumentException("Kernel size is " + values.length +
-                    " vs. " + KERNEL_SIZE);
-        }
-        System.arraycopy(values, 0, mKernel, 0, KERNEL_SIZE);
-        mColorAdjust = colorAdj;
-        //Log.d(TAG, "filt kernel: " + Arrays.toString(mKernel) + ", adj=" + colorAdj);
-    }
-
-    *//**
-     * Sets the size of the texture.  This is used to find adjacent texels when filtering.
-     *//*
-    public void setTexSize(int width, int height) {
-        float rw = 1.0f / width;
-        float rh = 1.0f / height;
-
-        // Don't need to create a new array here, but it's syntactically convenient.
-        mTexOffset = new float[] {
-                -rw, -rh,   0f, -rh,    rw, -rh,
-                -rw, 0f,    0f, 0f,     rw, 0f,
-                -rw, rh,    0f, rh,     rw, rh
-        };
-        //Log.d(TAG, "filt size: " + width + "x" + height + ": " + Arrays.toString(mTexOffset));
-    }*/
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
@@ -513,16 +483,18 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             surfaceTexture.getTransformMatrix(mTmpMatrix);
 
             //Fill the surfaceview with Camera frame
-            SurfaceView sv = (SurfaceView) findViewById(R.id.cameraView);
-            int viewWidth = sv.getWidth();
-            int viewHeight = sv.getHeight();
-            Log.d(TAG, "Surface View Height == " + viewHeight + " , Width == " + viewWidth);
-            GLES20.glViewport(0, 0, viewWidth,viewHeight);
+            int viewWidth = cameraView.getWidth();
+            int viewHeight = cameraView.getHeight();
+            if(frameCount==0) {
+                Log.d(TAG, "Surface View Height == " + viewHeight + " , Width == " + viewWidth);
+            }
+            GLES20.glViewport(0, 0, VIDEO_WIDTH,VIDEO_HEIGHT);
             draw(IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
                     createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
 
             //Calls eglSwapBuffers.  Use this to "publish" the current frame.
             EGL14.eglSwapBuffers(mEGLDisplay, eglSurface);
+            frameCount++;
         }
     }
 
