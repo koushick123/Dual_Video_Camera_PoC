@@ -138,6 +138,11 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     static final String AUDIO_PERMISSION = "android.permission.RECORD_AUDIO";
     static final String CAMERA_PERMISSION = "android.permission.CAMERA";
     private final String TAG = this.getClass().getName();
+    MediaMuxerHelper mediaMuxerHelper;
+    MediaMuxer mediaMuxer;
+    //RecordingHandler recordingHandler;
+    Thread audio;
+    Thread video;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -188,11 +193,26 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                     isRecording=true;
                     recordButton.setColorFilter(Color.RED);
                     //Record here
+                    prepareMuxer();
+                    setupAudioRecorder();
+                    try {
+                        audio = new Thread(new RecordAudio());
+                        audio.start();
+                    }
+                    catch (Exception e){
+                        e.printStackTrace();
+                    }
                 }
                 else{
                     isRecording=false;
                     recordButton.setColorFilter(Color.DKGRAY);
                     //Stop here
+                    try {
+                        audio.join();
+                        releaseMuxerAndEncoder();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                 }
             }
         });
@@ -201,22 +221,20 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         checkForPermissions();
     }
 
-    private void checkForPermissions()
-    {
+    private void checkForPermissions() {
         int permission = ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.CAMERA);
-        if(permission == PackageManager.PERMISSION_GRANTED) {
+        if (permission == PackageManager.PERMISSION_GRANTED) {
             SurfaceHolder sh = cameraView.getHolder();
             sh.addCallback(this);
             //setupCameraPreview();
-        }
-        else{
+        } else {
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.CAMERA},
                     MY_PERMISSIONS_REQUEST_CAMERA);
         }
 
         permission = ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.RECORD_AUDIO);
-        if(permission != PackageManager.PERMISSION_GRANTED){
+        if (permission != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.RECORD_AUDIO},
                     MY_PERMISSIONS_REQUEST_AUDIO);
@@ -286,7 +304,6 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     @Override
     protected void onResume() {
         super.onResume();
-
         setupCamera();
     }
 
@@ -358,7 +375,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         double screenAspectRatio = (double)metrics.widthPixels/(double)metrics.heightPixels;
         List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
 
-        //If none of the camera preview size will (closely) match with screen resolution, default it, to take the first preview size value.
+        //If none of the camera preview size will (closely) match with screen resolution, default it to take the first preview size value.
         VIDEO_HEIGHT = previewSizes.get(0).height;
         VIDEO_WIDTH = previewSizes.get(0).width;
         for(int i = 0;i<previewSizes.size();i++)
@@ -395,69 +412,23 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
     }
 
-    private void setupAudioRecorder()
+    private void releaseMuxerAndEncoder()
     {
+        mediaMuxerHelper.stopMuxer();
+        mediaMuxerHelper.releaseMuxer();
+        mediaMuxerHelper.releaseCodec();
+        Log.d(TAG,"RELEASED ALL");
+    }
+    private void prepareMuxer()
+    {
+        File file = new File(getExternalFilesDir(null),"myaudio.mp4");
+        Log.d(TAG,"Saving MEDIA at == "+file.getPath());
         try {
-            audioFormat = MediaFormat.createAudioFormat(AudioVideoRecording.MIME_TYPE, AudioVideoRecording.SAMPLE_RATE, 1);
-            audioFormat.setInteger(MediaFormat.KEY_BIT_RATE,AudioVideoRecording.BIT_RATE);
-            audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
-            audioFormat.setInteger(MediaFormat.KEY_CHANNEL_MASK, AudioFormat.CHANNEL_IN_MONO);
-            audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-            audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
-            mediaCodec = MediaCodec.createEncoderByType(AudioVideoRecording.MIME_TYPE);
-            mediaCodec.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-            mediaCodec.start();
-            isRecording=true;
-
-            int min_buffer_size = AudioRecord.getMinBufferSize(
-                    SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT);
-            Log.d(TAG,"MIN Buffer size == "+min_buffer_size);
-            int buffer_size = SAMPLES_PER_FRAME * FRAMES_PER_BUFFER;
-            if (buffer_size < min_buffer_size)
-                buffer_size = ((min_buffer_size / SAMPLES_PER_FRAME) + 1) * SAMPLES_PER_FRAME * 2;
-            Log.d(TAG,"Buffer size == "+buffer_size);
-            audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT, buffer_size);
-
-            Log.d(TAG,"Audio record state == "+audioRecord.getState());
-            if(audioRecord.getState() == 0)
-            {
-                final int[] AUDIO_SOURCES = new int[] {
-                MediaRecorder.AudioSource.DEFAULT,
-                        MediaRecorder.AudioSource.CAMCORDER,
-                        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            };
-                for(int audioSource : AUDIO_SOURCES)
-                {
-                    audioRecord = new AudioRecord(audioSource,SAMPLE_RATE ,
-                            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buffer_size);
-                    if(audioRecord.getState() == 1)
-                    {
-                        Log.d(TAG,"audioSource == "+audioSource);
-                        break;
-                    }
-                    audioRecord=null;
-                }
-            }
-            if(audioRecord == null || audioRecord.getState() == 0){
-                Toast.makeText(getApplicationContext(),"Audio record not supported in this device.",Toast.LENGTH_SHORT).show();
-                mediaCodec.stop();
-                mediaCodec.release();
-                return;
-            }
-            Log.d(TAG,"Recording is now started == "+isRecording);
-            Toast.makeText(getApplicationContext(),"Audio Record STARTED",Toast.LENGTH_SHORT).show();
-            try {
-                new Thread(new RecordAudio()).start();
-            }
-            catch (Exception e){
-                e.printStackTrace();
-            }
+            mediaMuxer = new MediaMuxer(file.getPath(),MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
         } catch (IOException e) {
             e.printStackTrace();
         }
+        mediaMuxerHelper = new MediaMuxerHelper(mediaMuxer);
     }
 
     @Override
@@ -722,6 +693,65 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         return configs[0];
     }
 
+    private void setupAudioRecorder()
+    {
+        try {
+            audioFormat = MediaFormat.createAudioFormat(AudioVideoRecording.MIME_TYPE, AudioVideoRecording.SAMPLE_RATE, 1);
+            audioFormat.setInteger(MediaFormat.KEY_BIT_RATE,AudioVideoRecording.BIT_RATE);
+            audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
+            audioFormat.setInteger(MediaFormat.KEY_CHANNEL_MASK, AudioFormat.CHANNEL_IN_MONO);
+            audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+            audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
+            mediaCodec = MediaCodec.createEncoderByType(AudioVideoRecording.MIME_TYPE);
+            mediaCodec.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            mediaCodec.start();
+            isRecording=true;
+
+            int min_buffer_size = AudioRecord.getMinBufferSize(
+                    SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT);
+            Log.d(TAG,"MIN Buffer size == "+min_buffer_size);
+            int buffer_size = SAMPLES_PER_FRAME * FRAMES_PER_BUFFER;
+            if (buffer_size < min_buffer_size)
+                buffer_size = ((min_buffer_size / SAMPLES_PER_FRAME) + 1) * SAMPLES_PER_FRAME * 2;
+            Log.d(TAG,"Buffer size == "+buffer_size);
+            audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT, buffer_size);
+
+            Log.d(TAG,"Audio record state == "+audioRecord.getState());
+            if(audioRecord.getState() == 0)
+            {
+                final int[] AUDIO_SOURCES = new int[] {
+                        MediaRecorder.AudioSource.DEFAULT,
+                        MediaRecorder.AudioSource.CAMCORDER,
+                        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                };
+                for(int audioSource : AUDIO_SOURCES)
+                {
+                    audioRecord = new AudioRecord(audioSource,SAMPLE_RATE ,
+                            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buffer_size);
+                    if(audioRecord.getState() == 1)
+                    {
+                        Log.d(TAG,"audioSource == "+audioSource);
+                        break;
+                    }
+                    audioRecord=null;
+                }
+            }
+            if(audioRecord == null || audioRecord.getState() == 0){
+                Toast.makeText(getApplicationContext(),"Audio record not supported in this device.",Toast.LENGTH_SHORT).show();
+                mediaCodec.stop();
+                mediaCodec.release();
+                return;
+            }
+            Log.d(TAG,"Recording is now started == "+isRecording);
+            Toast.makeText(getApplicationContext(),"Audio Record STARTED",Toast.LENGTH_SHORT).show();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     class RecordAudio extends Thread
     {
         @Override
@@ -730,7 +760,6 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             audioRecord.startRecording();
             final ByteBuffer[] inputBuffers = mediaCodec.getInputBuffers();
             Log.d(TAG,"Input buffer length == "+inputBuffers.length);
-            MediaMuxer mediaMuxer = null;
             ByteBuffer buf;
             boolean isEOS;
             int trackIndex = 0;
@@ -738,9 +767,6 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
             long count=0;
             try {
-                File file = new File(getExternalFilesDir(null),"myaudio.mp4");
-                Log.d(TAG,"Saving audio at == "+file.getPath());
-                mediaMuxer = new MediaMuxer(file.getPath(),MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
 
 MAIN_LOOP:                while (true) {
                     bufferIndex = mediaCodec.dequeueInputBuffer(TIMEOUT);
@@ -785,8 +811,9 @@ INNER_LOOP:             while(true) {
                                     outputBuffers[audioBufferInd].limit(bufferInfo.offset + bufferInfo.size);
                                     Log.d(TAG, "Writing data size == " + bufferInfo.size);
                                     count+=bufferInfo.size;
-                                    mediaMuxer.writeSampleData(trackIndex, outputBuffers[audioBufferInd], bufferInfo);
-                                    mediaCodec.releaseOutputBuffer(audioBufferInd, false);
+                                    mediaMuxerHelper.recordMedia(mediaCodec,bufferInfo,true,trackIndex,outputBuffers[audioBufferInd],audioBufferInd);
+                                    //mediaMuxer.writeSampleData(trackIndex, outputBuffers[audioBufferInd], bufferInfo);
+                                    //mediaCodec.releaseOutputBuffer(audioBufferInd, false);
                                     if(!isEOS) {
                                         break INNER_LOOP;
                                     }
@@ -799,8 +826,10 @@ INNER_LOOP:             while(true) {
                             } else if (audioBufferInd == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                                 // Subsequent data will conform to new format.
                                 audioFormat = mediaCodec.getOutputFormat();
-                                trackIndex = mediaMuxer.addTrack(audioFormat);
-                                mediaMuxer.start();
+                                //trackIndex = mediaMuxer.addTrack(audioFormat);
+                                //mediaMuxer.start();
+                                trackIndex = mediaMuxerHelper.addTrack(audioFormat,true);
+                                mediaMuxerHelper.startMuxer();
                             } else if (audioBufferInd == MediaCodec.INFO_TRY_AGAIN_LATER) {
                                 if (!isEOS) {
                                     break INNER_LOOP;
@@ -827,22 +856,82 @@ INNER_LOOP:             while(true) {
                 Log.d(TAG,"Audio saved");
             } catch (RuntimeException e) {
                 e.printStackTrace();
-            } catch (IOException e) {
-                e.printStackTrace();
             }
             finally {
                 if(audioRecord!=null){
                     audioRecord.release();
                 }
-                if(mediaMuxer!=null) {
+                /*if(mediaMuxer!=null) {
                     mediaMuxer.stop();
                     mediaMuxer.release();
                 }
                 if(mediaCodec!=null){
                     mediaCodec.stop();
                     mediaCodec.release();
+                }*/
+            }
+            //handler.sendEmptyMessage(AUDIO_COMPLETE);
+        }
+    }
+
+    class MediaMuxerHelper
+    {
+        MediaMuxer mediaMuxer;
+        boolean muxerStarted=false;
+
+        public MediaMuxerHelper(MediaMuxer mMuxer)
+        {
+            mediaMuxer = mMuxer;
+        }
+
+        synchronized private void recordMedia(MediaCodec mediaCodec, MediaCodec.BufferInfo bufferInfo, boolean audioTrack,int trackIndex,ByteBuffer mediaData,int audioBufferInd)
+        {
+            //Extract encoded data
+            Log.d(TAG,"Recording for "+(audioTrack ? "AUDIO" : "VIDEO"));
+            mediaMuxer.writeSampleData(trackIndex, mediaData, bufferInfo);
+            mediaCodec.releaseOutputBuffer(audioBufferInd, false);
+        }
+
+        synchronized private int addTrack(MediaFormat mediaFormat,boolean audioTrack)
+        {
+            Log.d(TAG,"adding track for "+(audioTrack ? "AUDIO" : "VIDEO"));
+            return mediaMuxer.addTrack(mediaFormat);
+        }
+
+        private void releaseMuxer()
+        {
+            if(mediaMuxer!=null) {
+                mediaMuxer.release();
+                mediaMuxer=null;
+            }
+        }
+
+        synchronized private void startMuxer()
+        {
+            if(mediaMuxer!=null) {
+                if (!muxerStarted) {
+                    mediaMuxer.start();
+                    muxerStarted=true;
                 }
-                Log.d(TAG,"RELEASED ALL");
+            }
+        }
+
+        private void stopMuxer()
+        {
+            if(mediaMuxer!=null){
+                if(muxerStarted){
+                    mediaMuxer.stop();
+                    muxerStarted=false;
+                }
+            }
+        }
+
+        private void releaseCodec()
+        {
+            if(mediaCodec!=null){
+                mediaCodec.stop();
+                mediaCodec.release();
+                mediaCodec=null;
             }
         }
     }
