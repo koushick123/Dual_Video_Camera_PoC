@@ -7,6 +7,7 @@ import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
+import android.media.CamcorderProfile;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
@@ -16,11 +17,14 @@ import android.opengl.EGL14;
 import android.opengl.EGLConfig;
 import android.opengl.EGLContext;
 import android.opengl.EGLDisplay;
+import android.opengl.EGLExt;
 import android.opengl.EGLSurface;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.Matrix;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -40,6 +44,7 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
@@ -53,9 +58,21 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
     private AudioRecord audioRecord;
     private MediaCodec mediaCodec;
+    CamcorderProfile camcorderProfile;
+    final String VIDEO_MIME_TYPE = "video/avc";
+    private MediaCodec videoCodec;
+    int cameraId;
+    volatile boolean isAudioAdded = false;
+    volatile boolean isVideoAdded = false;
     private static int VIDEO_WIDTH = 1280;  // dimensions for 720p video
     private static int VIDEO_HEIGHT = 720;
     private SurfaceView cameraView;
+    final int FRAME_AVAILABLE = 1000;
+    final int RECORD_STOP = 2000;
+    final int RECORD_START = 3000;
+    //final int RECORD_COMPLETED = 4000;
+    final int GET_RECORDER = 5000;
+    boolean recordStarted=false;
     SurfaceTexture surfaceTexture;
     private Camera mCamera;
     private EGLDisplay mEGLDisplay = EGL14.EGL_NO_DISPLAY;
@@ -94,6 +111,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     };
     //Surface onto which camera frames are drawn
     EGLSurface eglSurface;
+    Surface videoSurface;
     //Surface to which camera frames are sent for encoding to mp4 format
     EGLSurface encoderSurface;
     private final float[] mTmpMatrix = new float[16];
@@ -133,6 +151,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     public static final int SAMPLES_PER_FRAME = 1024;	// AAC, bytes/frame/channel
     public static final int FRAMES_PER_BUFFER = 25; 	// AAC, frame/buffer/sec
     MediaFormat audioFormat=null;
+    MediaFormat videoFormat=null;
     int TIMEOUT = 10000;
 
     static final String AUDIO_PERMISSION = "android.permission.RECORD_AUDIO";
@@ -140,7 +159,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     private final String TAG = this.getClass().getName();
     MediaMuxerHelper mediaMuxerHelper;
     MediaMuxer mediaMuxer;
-    //RecordingHandler recordingHandler;
+    RecordVideo.VideoRecordHandler recordHandler;
     Thread audio;
     Thread video;
 
@@ -183,6 +202,8 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_audio_video_recording);
         cameraView = (SurfaceView) findViewById(R.id.cameraView);
+        recordHandler = new RecordVideo().getHandle();
+        recordHandler.sendEmptyMessage(GET_RECORDER);
         final ImageButton recordButton = (ImageButton)findViewById(R.id.record_button);
         recordButton.setColorFilter(Color.DKGRAY);
         recordButton.setOnClickListener(new View.OnClickListener(){
@@ -194,21 +215,25 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                     recordButton.setColorFilter(Color.RED);
                     //Record here
                     prepareMuxer();
-                    setupAudioRecorder();
+                    /*setupAudioRecorder();
                     try {
                         audio = new Thread(new RecordAudio());
                         audio.start();
                     }
                     catch (Exception e){
                         e.printStackTrace();
-                    }
+                    }*/
+                    setupVideoRecorder();
                 }
                 else{
                     isRecording=false;
                     recordButton.setColorFilter(Color.DKGRAY);
                     //Stop here
                     try {
-                        audio.join();
+                        audio.join(2500);
+                        recordHandler.sendEmptyMessage(RECORD_STOP);
+                        video.join(2500);
+                        recordStarted=false;
                         releaseMuxerAndEncoder();
                     } catch (InterruptedException e) {
                         e.printStackTrace();
@@ -219,6 +244,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         getSupportActionBar().hide();
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         checkForPermissions();
+        //setupVideoRecorder();
     }
 
     private void checkForPermissions() {
@@ -347,6 +373,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             Camera.getCameraInfo(i, info);
             if(info.facing == Camera.CameraInfo.CAMERA_FACING_BACK){
                 mCamera = Camera.open(i);
+                cameraId = i;
                 break;
             }
         }
@@ -409,16 +436,41 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
     private void setupVideoRecorder()
     {
-
+        camcorderProfile = CamcorderProfile.get(cameraId,CamcorderProfile.QUALITY_HIGH);
+        Log.d(TAG,"VID Bit rate = "+camcorderProfile.videoBitRate);
+        Log.d(TAG,"VID videoFrameRate = "+camcorderProfile.videoFrameRate);
+        Log.d(TAG,"VID videoFrameHeight = "+camcorderProfile.videoFrameHeight);
+        Log.d(TAG,"VID videoFrameWidth = "+camcorderProfile.videoFrameWidth);
+        Log.d(TAG,"AUD audioBitRate = "+camcorderProfile.audioBitRate);
+        Log.d(TAG,"AUD audioChannels = "+camcorderProfile.audioChannels);
+        Log.d(TAG,"AUD audioSampleRate = "+camcorderProfile.audioSampleRate);
+        Log.d(TAG,"AUD audioCodec = "+camcorderProfile.audioCodec);
+        videoFormat = MediaFormat.createVideoFormat(VIDEO_MIME_TYPE,camcorderProfile.videoFrameWidth,camcorderProfile.videoFrameHeight);
+        videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT,
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        videoFormat.setInteger(MediaFormat.KEY_BIT_RATE, camcorderProfile.videoBitRate);
+        videoFormat.setInteger(MediaFormat.KEY_FRAME_RATE, camcorderProfile.videoFrameRate);
+        videoFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2);
+        try {
+            videoCodec = MediaCodec.createEncoderByType(VIDEO_MIME_TYPE);
+            videoCodec.configure(videoFormat,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);
+            videoSurface = videoCodec.createInputSurface();
+            videoCodec.start();
+            encoderSurface = prepareWindowSurface(videoSurface);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     private void releaseMuxerAndEncoder()
     {
         mediaMuxerHelper.stopMuxer();
         mediaMuxerHelper.releaseMuxer();
-        mediaMuxerHelper.releaseCodec();
+        //mediaMuxerHelper.releaseCodec();
+        releaseAudioAndVideoCodecs();
         Log.d(TAG,"RELEASED ALL");
     }
+
     private void prepareMuxer()
     {
         File file = new File(getExternalFilesDir(null),"myaudio.mp4");
@@ -435,7 +487,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     public void surfaceCreated(SurfaceHolder surfaceHolder) {
         Log.d(TAG, "surfCreated holder = " + surfaceHolder);
         prepareEGLDisplayandContext();
-        prepareWindowSurface(surfaceHolder.getSurface());
+        eglSurface = prepareWindowSurface(surfaceHolder.getSurface());
 
         mProgramHandle = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER_EXT);
 
@@ -471,7 +523,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
         //If camera is being released, don't do anything.
         if(mCamera!=null) {
-            makeCurrent();
+            makeCurrent(eglSurface);
             //Get next frame from camera
             surfaceTexture.updateTexImage();
             surfaceTexture.getTransformMatrix(mTmpMatrix);
@@ -488,6 +540,20 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
             //Calls eglSwapBuffers.  Use this to "publish" the current frame.
             EGL14.eglSwapBuffers(mEGLDisplay, eglSurface);
+
+            if(isRecording){
+                makeCurrent(encoderSurface);
+                GLES20.glViewport(0, 0, VIDEO_WIDTH,VIDEO_HEIGHT);
+                draw(IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
+                        createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
+                if(!recordStarted){
+                    recordHandler.sendEmptyMessage(RECORD_START);
+                    recordStarted=true;
+                }
+                recordHandler.sendEmptyMessage(FRAME_AVAILABLE);
+                EGLExt.eglPresentationTimeANDROID(mEGLDisplay,encoderSurface,surfaceTexture.getTimestamp());
+                EGL14.eglSwapBuffers(mEGLDisplay, encoderSurface);
+            }
             frameCount++;
         }
     }
@@ -505,9 +571,9 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         return fb;
     }
 
-    private void makeCurrent()
+    private void makeCurrent(EGLSurface surface)
     {
-        EGL14.eglMakeCurrent(mEGLDisplay, eglSurface, eglSurface, mEGLContext);
+        EGL14.eglMakeCurrent(mEGLDisplay, surface, surface, mEGLContext);
     }
     /**
      * Creates a texture object suitable for use with this program.
@@ -575,7 +641,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         }
     }
 
-    private void prepareWindowSurface(Surface surface)
+    private EGLSurface prepareWindowSurface(Surface surface)
     {
         // Create a window surface, and attach it to the Surface we received.
         int[] surfaceAttribs = {
@@ -587,7 +653,8 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         if (eglSurface == null) {
             throw new RuntimeException("surface was null");
         }
-        makeCurrent();
+        makeCurrent(eglSurface);
+        return eglSurface;
     }
 
     /**
@@ -643,13 +710,6 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         GLES20.glVertexAttribPointer(maTextureCoordLoc, 2,
                 GLES20.GL_FLOAT, false, texStride, texBuffer);
         GlUtil.checkGlError("glVertexAttribPointer");
-
-        /*// Populate the convolution kernel, if present.
-        if (muKernelLoc >= 0) {
-            GLES20.glUniform1fv(muKernelLoc, KERNEL_SIZE, mKernel, 0);
-            GLES20.glUniform2fv(muTexOffsetLoc, KERNEL_SIZE, mTexOffset, 0);
-            GLES20.glUniform1f(muColorAdjustLoc, mColorAdjust);
-        }*/
 
         // Draw the rect.
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, firstVertex, vertexCount);
@@ -752,6 +812,129 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         }
     }
 
+    class RecordVideo extends Thread
+    {
+        boolean isEOS=false;
+        long count=0;
+        int message=RECORD_STOP;
+
+        public VideoRecordHandler getHandle(){
+            VideoRecordHandler videoRecordHandler=new VideoRecordHandler(this);
+            return videoRecordHandler;
+        }
+        @Override
+        public void run(){
+            while(!isEOS){
+
+            }
+            Log.d(TAG,"Video thread EXITING!");
+        }
+
+        private void sendToMuxer()
+        {
+            int trackIndex = 0;
+            int videoBufferInd;
+            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+
+            /*if(!isRecording){
+                Log.d(TAG, "send Video BUFFER_FLAG_END_OF_STREAM");
+                //videoCodec.signalEndOfInputStream();
+                isEOS=true;
+            }*/
+            try {
+                ByteBuffer[] outputBuffers = videoCodec.getOutputBuffers();
+                while (true)
+                {
+                    //Extract encoded data
+                    Log.d(TAG, "Retrieve Encoded Data....");
+                    videoBufferInd = videoCodec.dequeueOutputBuffer(bufferInfo, TIMEOUT);
+                    Log.d(TAG, "OUTPUT buffer index = " + videoBufferInd);
+                    if (videoBufferInd >= 0) {
+                        if (bufferInfo.size != 0) {
+                            outputBuffers[videoBufferInd].position(bufferInfo.offset);
+                            //bufferInfo.presentationTimeUs=System.nanoTime()/1000;
+                            outputBuffers[videoBufferInd].limit(bufferInfo.offset + bufferInfo.size);
+                            Log.d(TAG, "Writing data size == " + bufferInfo.size);
+                            count+=bufferInfo.size;
+                            mediaMuxerHelper.recordMedia(videoCodec,bufferInfo,false,trackIndex,outputBuffers[videoBufferInd],videoBufferInd);
+                            if(isEOS) {
+                                break;
+                            }
+                        }
+                    } else if (videoBufferInd == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                        outputBuffers = videoCodec.getOutputBuffers();
+                    } else if (videoBufferInd == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        // Subsequent data will conform to new format.
+                        videoFormat = videoCodec.getOutputFormat();
+                        trackIndex = mediaMuxerHelper.addTrack(videoFormat,false);
+                        isVideoAdded=true;
+                        mediaMuxerHelper.startMuxer();
+                    } else if (videoBufferInd == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                        break;
+                    }
+                }
+            } catch (RuntimeException e) {
+                e.printStackTrace();
+            }
+        }
+
+        private void setEOS(boolean eos)
+        {
+            isEOS = eos;
+        }
+
+        private void countBytes()
+        {
+            String bytes = "";
+            if (count > 1000000){
+                bytes = count/1000000+" MB";
+            }
+            else if(count > 1000){
+                bytes = count/1000+" KB";
+            }
+            else{
+                bytes = count+" Bytes";
+            }
+            Log.d(TAG,"Written "+bytes+" of data");
+            Log.d(TAG,"Video Record STOPPED");
+            Log.d(TAG,"Video saved");
+            isVideoAdded=false;
+        }
+
+        class VideoRecordHandler extends Handler
+        {
+            WeakReference<RecordVideo> recordVid;
+            public VideoRecordHandler(RecordVideo recordVideo) {
+                recordVid = new WeakReference<>(recordVideo);
+            }
+
+            @Override
+            public void handleMessage(Message msg) {
+                RecordVideo recordVideo = recordVid.get();
+                switch(msg.what)
+                {
+                    case FRAME_AVAILABLE:
+                        recordVideo.sendToMuxer();
+                        break;
+                    case RECORD_STOP:
+                        Log.d(TAG, "send Video BUFFER_FLAG_END_OF_STREAM");
+                        recordVideo.setEOS(true);
+                        countBytes();
+                        break;
+                    case RECORD_START:
+                        recordVideo.setEOS(false);
+                        recordVideo.start();
+                        break;
+                    case GET_RECORDER:
+                        video = recordVideo;
+                        break;
+                }
+            }
+        }
+    }
+
+    Object syncObject = new Object();
+
     class RecordAudio extends Thread
     {
         @Override
@@ -771,7 +954,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 MAIN_LOOP:                while (true) {
                     bufferIndex = mediaCodec.dequeueInputBuffer(TIMEOUT);
                     isEOS=false;
-                    Log.d(TAG,"INPUT buffer Index == "+bufferIndex);
+                    //Log.d(TAG,"INPUT buffer Index == "+bufferIndex);
                     if(!isRecording){
                         Log.d(TAG, "send BUFFER_FLAG_END_OF_STREAM");
                         mediaCodec.queueInputBuffer(bufferIndex, 0, len, System.nanoTime()/1000, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
@@ -782,7 +965,7 @@ MAIN_LOOP:                while (true) {
                         //Do nothing. Need to wait till encoder is ready to accept data again.
                     }
                     else if(bufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){
-                        Log.d(TAG,"Output format changed");
+                        //Log.d(TAG,"Output format changed");
                         audioFormat = mediaCodec.getOutputFormat();
                     }
 
@@ -793,7 +976,7 @@ MAIN_LOOP:                while (true) {
                         if (len ==  AudioRecord.ERROR_INVALID_OPERATION || len == AudioRecord.ERROR_BAD_VALUE) {
                             Log.e(this.getClass().getName(),"An error occurred with the AudioRecord API !");
                         } else {
-                            Log.d(TAG,"Pushing raw audio to the decoder: len="+len+" bs: "+inputBuffers[bufferIndex].capacity());
+                            //Log.d(TAG,"Pushing raw audio to the decoder: len="+len+" bs: "+inputBuffers[bufferIndex].capacity());
                             mediaCodec.queueInputBuffer(bufferIndex, 0, len, System.nanoTime()/1000, 0);
                         }
                     }
@@ -801,15 +984,15 @@ MAIN_LOOP:                while (true) {
                     //Extract encoded data
                         ByteBuffer[] outputBuffers = mediaCodec.getOutputBuffers();
 INNER_LOOP:             while(true) {
-                            Log.d(TAG, "Retrieve Encoded Data....");
+                            //Log.d(TAG, "Retrieve Encoded Data....");
                             audioBufferInd = mediaCodec.dequeueOutputBuffer(bufferInfo, TIMEOUT);
-                            Log.d(TAG, "OUTPUT buffer index = " + audioBufferInd);
+                            //Log.d(TAG, "OUTPUT buffer index = " + audioBufferInd);
                             if (audioBufferInd >= 0) {
                                 if (bufferInfo.size != 0) {
                                     outputBuffers[audioBufferInd].position(bufferInfo.offset);
                                     bufferInfo.presentationTimeUs=System.nanoTime()/1000;
                                     outputBuffers[audioBufferInd].limit(bufferInfo.offset + bufferInfo.size);
-                                    Log.d(TAG, "Writing data size == " + bufferInfo.size);
+                                    //Log.d(TAG, "Writing data size == " + bufferInfo.size);
                                     count+=bufferInfo.size;
                                     mediaMuxerHelper.recordMedia(mediaCodec,bufferInfo,true,trackIndex,outputBuffers[audioBufferInd],audioBufferInd);
                                     //mediaMuxer.writeSampleData(trackIndex, outputBuffers[audioBufferInd], bufferInfo);
@@ -829,6 +1012,11 @@ INNER_LOOP:             while(true) {
                                 //trackIndex = mediaMuxer.addTrack(audioFormat);
                                 //mediaMuxer.start();
                                 trackIndex = mediaMuxerHelper.addTrack(audioFormat,true);
+                                isAudioAdded=true;
+                                while(!isVideoAdded){
+                                    Thread.sleep(10);
+                                    Log.d(TAG,"Audio Sleeping");
+                                }
                                 mediaMuxerHelper.startMuxer();
                             } else if (audioBufferInd == MediaCodec.INFO_TRY_AGAIN_LATER) {
                                 if (!isEOS) {
@@ -854,23 +1042,30 @@ INNER_LOOP:             while(true) {
                 audioRecord.stop();
                 Log.d(TAG,"Audio Record STOPPED");
                 Log.d(TAG,"Audio saved");
+                isAudioAdded=false;
             } catch (RuntimeException e) {
                 e.printStackTrace();
-            }
-            finally {
-                if(audioRecord!=null){
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } finally {
+                if (audioRecord != null) {
                     audioRecord.release();
                 }
-                /*if(mediaMuxer!=null) {
-                    mediaMuxer.stop();
-                    mediaMuxer.release();
-                }
-                if(mediaCodec!=null){
-                    mediaCodec.stop();
-                    mediaCodec.release();
-                }*/
             }
-            //handler.sendEmptyMessage(AUDIO_COMPLETE);
+        }
+    }
+
+    private void releaseAudioAndVideoCodecs()
+    {
+        if(mediaCodec!=null){
+            mediaCodec.stop();
+            mediaCodec.release();
+            mediaCodec=null;
+        }
+        if(videoCodec!=null){
+            videoCodec.stop();
+            videoCodec.release();
+            videoCodec=null;
         }
     }
 
@@ -932,6 +1127,23 @@ INNER_LOOP:             while(true) {
                 mediaCodec.stop();
                 mediaCodec.release();
                 mediaCodec=null;
+            }
+        }
+    }
+
+    class MainHandler extends Handler {
+        WeakReference<AudioVideoRecording> recordVid;
+
+        public MainHandler(AudioVideoRecording recordVideo) {
+            recordVid = new WeakReference<>(recordVideo);
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+
+            switch(msg.what)
+            {
+
             }
         }
     }
