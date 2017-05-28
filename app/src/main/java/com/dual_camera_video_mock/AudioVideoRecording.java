@@ -24,6 +24,7 @@ import android.opengl.GLES20;
 import android.opengl.Matrix;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
@@ -73,7 +74,8 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     final int RECORD_START = 3000;
     //final int RECORD_COMPLETED = 4000;
     final int GET_RECORDER = 5000;
-    boolean recordStarted=false;
+    final int SHUTDOWN = 6000;
+    final int GET_READY = 7000;
     SurfaceTexture surfaceTexture;
     private Camera mCamera;
     private EGLDisplay mEGLDisplay = EGL14.EGL_NO_DISPLAY;
@@ -145,7 +147,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                     "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
                     "}\n";
 
-    private volatile boolean isRecording=false;
+    volatile boolean isRecording=false;
     volatile boolean isCapturing=false;
     final static String MIME_TYPE = "audio/mp4a-latm";
     final static int SAMPLE_RATE = 44100;
@@ -161,7 +163,8 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
     final String TAG = this.getClass().getName();
     MediaMuxerHelper mediaMuxerHelper;
     MediaMuxer mediaMuxer;
-    RecordVideo.VideoRecordHandler recordHandler;
+    RecordVideo.VideoRecordHandler recordHandler=null;
+    MainHandler mainHandler;
     Thread audio;
     Thread video;
 
@@ -204,8 +207,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_audio_video_recording);
         cameraView = (SurfaceView) findViewById(R.id.cameraView);
-        recordHandler = new RecordVideo().getHandle();
-        recordHandler.sendEmptyMessage(GET_RECORDER);
+        mainHandler = new MainHandler(this);
         final ImageButton recordButton = (ImageButton)findViewById(R.id.record_button);
         recordButton.setColorFilter(Color.DKGRAY);
         recordButton.setOnClickListener(new View.OnClickListener(){
@@ -213,7 +215,6 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             public void onClick(View view)
             {
                 if(!isRecording){
-                    isRecording=true;
                     recordButton.setColorFilter(Color.RED);
                     //Record here
                     prepareMuxer();
@@ -225,8 +226,13 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                     catch (Exception e){
                         e.printStackTrace();
                     }*/
+                    video = new RecordVideo();
+                    video.start();
+                    waitUntilReady();
                     recordHandler.sendEmptyMessage(RECORD_START);
-                    setupVideoRecorder();
+                    //isRecording=true;
+                    //recordHandler.sendEmptyMessage(GET_READY);
+                    //setupVideoRecorder();
                 }
                 else{
                     isRecording=false;
@@ -234,6 +240,9 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                     //Stop here
                         //audio.join(2500);
                         recordHandler.sendEmptyMessage(RECORD_STOP);
+                    Log.d(TAG,"Recorder thread EXITED...");
+                    //recordHandler.sendEmptyMessage(SHUTDOWN);
+                        //recordHandler.sendEmptyMessage(GET_RECORDER);
                     }
             }
         });
@@ -460,11 +469,11 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
     private void releaseMuxerAndEncoder()
     {
+        releaseAudioAndVideoCodecs();
         mediaMuxerHelper.stopMuxer();
         mediaMuxerHelper.releaseMuxer();
         Log.d(TAG,"MUXER RELEASED");
         //mediaMuxerHelper.releaseCodec();
-        releaseAudioAndVideoCodecs();
         Log.d(TAG,"RELEASED ALL");
     }
 
@@ -519,20 +528,24 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
+            mainHandler.sendEmptyMessage(FRAME_AVAILABLE);
+    }
 
-        if(mCamera!=null) {
+    private void drawFrame()
+    {
+        if(mEGLConfig!=null) {
             makeCurrent(eglSurface);
             //Get next frame from camera
             surfaceTexture.updateTexImage();
             surfaceTexture.getTransformMatrix(mTmpMatrix);
 
             //Fill the surfaceview with Camera frame
-            /*int viewWidth = cameraView.getWidth();
-            int viewHeight = cameraView.getHeight();*/
+            int viewWidth = cameraView.getWidth();
+            int viewHeight = cameraView.getHeight();
             if (frameCount >= 0) {
                 //Log.d(TAG, "FRAME Count = "+frameCount);
             }
-            GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+            GLES20.glViewport(0, 0, viewWidth, viewHeight);
             draw(IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
                     createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
 
@@ -551,7 +564,6 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
             frameCount++;
         }
     }
-
     /**
      * Allocates a direct float buffer, and populates it with the float array data.
      */
@@ -805,6 +817,19 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         }
     }
 
+    public void waitUntilReady()
+    {
+        synchronized (recordSync){
+            try {
+                Log.d(TAG,"Waiting...");
+                recordSync.wait();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        Log.d(TAG,"Come out of WAIT");
+    }
+
     class RecordVideo extends Thread
     {
         boolean isEOS=false;
@@ -817,7 +842,59 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
         }
         @Override
         public void run(){
-            sendToMuxer();
+            Looper.prepare();
+            recordHandler = getHandle();
+            synchronized (recordSync){
+                recordSync.notify();
+            }
+            Looper.loop();
+            Log.d(TAG,"End of Loop");
+        }
+
+        void shutdown()
+        {
+            Looper.myLooper().quit();
+            EGL14.eglDestroySurface(mEGLDisplay,encoderSurface);
+            releaseMuxerAndEncoder();
+            videoSurface.release();
+            /*EGL14.eglMakeCurrent(mEGLDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE,
+                    EGL14.EGL_NO_CONTEXT);*/
+        }
+
+        void recordStop()
+        {
+            Log.d(TAG,"Drain one last time");
+            drain();
+            videoCodec.signalEndOfInputStream();
+            countBytes();
+        }
+
+        private void setupVideoRecorder()
+        {
+            camcorderProfile = CamcorderProfile.get(cameraId,CamcorderProfile.QUALITY_HIGH);
+            Log.d(TAG,"VID Bit rate = "+camcorderProfile.videoBitRate);
+            Log.d(TAG,"VID videoFrameRate = "+camcorderProfile.videoFrameRate);
+            Log.d(TAG,"VID videoFrameHeight = "+camcorderProfile.videoFrameHeight);
+            Log.d(TAG,"VID videoFrameWidth = "+camcorderProfile.videoFrameWidth);
+            Log.d(TAG,"AUD audioBitRate = "+camcorderProfile.audioBitRate);
+            Log.d(TAG,"AUD audioChannels = "+camcorderProfile.audioChannels);
+            Log.d(TAG,"AUD audioSampleRate = "+camcorderProfile.audioSampleRate);
+            Log.d(TAG,"AUD audioCodec = "+camcorderProfile.audioCodec);
+            videoFormat = MediaFormat.createVideoFormat(VIDEO_MIME_TYPE,VIDEO_WIDTH,VIDEO_HEIGHT);
+            videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+            videoFormat.setInteger(MediaFormat.KEY_BIT_RATE, camcorderProfile.videoBitRate);
+            videoFormat.setInteger(MediaFormat.KEY_FRAME_RATE, camcorderProfile.videoFrameRate);
+            videoFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2);
+            try {
+                videoCodec = MediaCodec.createEncoderByType(VIDEO_MIME_TYPE);
+                videoCodec.configure(videoFormat,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);
+                videoSurface = videoCodec.createInputSurface();
+                videoCodec.start();
+                encoderSurface = prepareWindowSurface(videoSurface);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
 
         private void sendToMuxer()
@@ -828,32 +905,28 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                 isEOS=true;
             }*/
             try {
-                while(true) {
-                    synchronized (recordSync) {
-                        if (!isCapturing) {
-                            Log.d(TAG,"Waiting......");
-                            recordSync.wait();
-                        }
-                    }
+                /*while(true) {
                     if(!isEOS) {
-                        drain();
+
                     }
                     else {
-                        Log.d(TAG,"Drain one last time");
-                        drain();
-                        videoCodec.signalEndOfInputStream();
-                        drain();
-                        releaseMuxerAndEncoder();
+
                         break;
                     }
-                    synchronized (recordSync){
+                    synchronized (recordSync) {
                         isCapturing=false;
+                        if (!isCapturing) {
+                            Log.d(TAG,"Waiting......");
+                            try {
+                                recordSync.wait();
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            }
+                        }
                     }
-                }
-                countBytes();
+                }*/
+                drain();
             } catch (RuntimeException e) {
-                e.printStackTrace();
-            } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
@@ -938,31 +1011,41 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
                 {
                     case FRAME_AVAILABLE:
                         Log.d(TAG, "send FRAME DATA");
-                        synchronized (recordSync) {
+                        /*synchronized (recordSync) {
                             //isRecording=true;
                             isCapturing = true;
                             recordSync.notify();
-                        }
+                        }*/
+                        recordVideo.sendToMuxer();
                         break;
                     case RECORD_STOP:
                         Log.d(TAG, "send Video BUFFER_FLAG_END_OF_STREAM");
                         recordVideo.setEOS(true);
-                        while(isCapturing){
+                        recordVideo.recordStop();
+                        recordVideo.shutdown();
+                        /*while(isCapturing){
 
-                        }
-                        synchronized (recordSync) {
+                        }*/
+                        /*synchronized (recordSync) {
                             isCapturing = true;
                             //isRecording=false;
                             recordSync.notify();
-                        }
+                        }*/
                         break;
                     case RECORD_START:
+                        recordVideo.setupVideoRecorder();
+                        isRecording=true;
+                        break;
+                    /*case GET_RECORDER:
+                        video = recordVideo;
+                        break;*/
+                    /*case SHUTDOWN:
+                        recordVideo.shutdown();
+                        break;*/
+                    /*case GET_READY:
                         recordVideo.setEOS(false);
                         recordVideo.start();
-                        break;
-                    case GET_RECORDER:
-                        video = recordVideo;
-                        break;
+                        break;*/
                 }
             }
         }
@@ -1179,9 +1262,12 @@ INNER_LOOP:             while(true) {
         @Override
         public void handleMessage(Message msg) {
 
+            AudioVideoRecording audioVideoRecording = recordVid.get();
             switch(msg.what)
             {
-
+                case FRAME_AVAILABLE:
+                    audioVideoRecording.drawFrame();
+                    break;
             }
         }
     }

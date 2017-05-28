@@ -10,12 +10,10 @@ import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
 import android.view.Display;
-import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.Toast;
 
 import java.io.File;
@@ -56,16 +54,10 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
     private File mOutputFile;
     private CircularEncoder mCircEncoder;
     private WindowSurface mEncoderSurface;
-    private boolean mFileSaveInProgress=false;
+    private boolean mFileSaveInProgress;
 
     private MainHandler mHandler;
-    boolean isFrontFacingCam=true;
-    private int cameraId;
-    float mSecondsOfVideo;
-    Button btn;
-    Button switchBtn;
-    private boolean mRecordinProgress=false;
-    private boolean switchWhileRecord=false;
+    private float mSecondsOfVideo;
 
     /**
      * Custom message handler for main UI thread.
@@ -103,13 +95,13 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         public void handleMessage(Message msg) {
             ContinuousCaptureActivity activity = mWeakActivity.get();
             if (activity == null) {
-                Log.d(TAG, "Got msg for dead act.");
+                Log.d(TAG, "Got message for dead activity");
                 return;
             }
 
             switch (msg.what) {
                 /*case MSG_BLINK_TEXT: {
-                    TextView tv = (TextView) activity.findViewById(R.id.recording_text);
+                    TextView tv = (TextView) activity.findViewById(R.id.);
 
                     // Attempting to make it blink by using setEnabled() doesn't work --
                     // it just changes the color.  We want to change the visibility.
@@ -155,36 +147,12 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         sh.addCallback(this);
 
         mHandler = new MainHandler(this);
+        //mHandler.sendEmptyMessageDelayed(MainHandler.MSG_BLINK_TEXT, 1500);
 
-        mOutputFile = new File(getExternalFilesDir(null), "continuous-capture.mp4");
-        Log.d(TAG,"Saving file at == "+getExternalFilesDir(null).getPath());
+        mOutputFile = new File(getFilesDir(), "continuous-capture.mp4");
         mSecondsOfVideo = 0.0f;
-        btn = (Button)findViewById(R.id.capture_button);
-        btn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                if(!mRecordinProgress)
-                {
-                    startRecording();
-                }
-                else
-                {
-                    stopRecording();
-                }
-            }
-        });
-        switchBtn = (Button)findViewById(R.id.switchCamera);
-        switchBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                if(mCamera!=null) {
-                    releaseCamera();
-                }
-                openCamera(VIDEO_WIDTH,VIDEO_HEIGHT,DESIRED_PREVIEW_FPS);
-                showCameraPreview();
-            }
-        });
-     }
+        //updateControls();
+    }
 
     @Override
     protected void onResume() {
@@ -240,21 +208,9 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         int numCameras = Camera.getNumberOfCameras();
         for (int i = 0; i < numCameras; i++) {
             Camera.getCameraInfo(i, info);
-            if(!isFrontFacingCam) {
-                if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-                    mCamera = Camera.open(i);
-                    cameraId = i;
-                    isFrontFacingCam = true;
-                    break;
-                }
-            }
-            else{
-                if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
-                    mCamera = Camera.open(i);
-                    cameraId = i;
-                    isFrontFacingCam = false;
-                    break;
-                }
+            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                mCamera = Camera.open(i);
+                break;
             }
         }
         if (mCamera == null) {
@@ -312,85 +268,44 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         }
     }
 
-    private void startRecording()
-    {
-        btn.setText("STOP RECORD");
-        mRecordinProgress=true;
-        try{
-            mCircEncoder = new CircularEncoder(VIDEO_WIDTH, VIDEO_HEIGHT, 6000000,
-                    mCameraPreviewThousandFps / 1000, 20, mHandler);
-        } catch (IOException ioe) {
-            throw new RuntimeException(ioe);
-        }
-        mEncoderSurface = new WindowSurface(mEglCore, mCircEncoder.getInputSurface(), true);
-    }
+    /**
+     * Updates the current state of the controls.
+     */
+    /*private void updateControls() {
+        String str = getString(R.string.secondsOfVideo, mSecondsOfVideo);
+        TextView tv = (TextView) findViewById(R.id.capturedVideoDesc_text);
+        tv.setText(str);
 
-    private void stopRecording()
-    {
-        btn.setText("START RECORD");
-        mRecordinProgress=false;
-        mFileSaveInProgress=true;
+        boolean wantEnabled = (mCircEncoder != null) && !mFileSaveInProgress;
+        Button button = (Button) findViewById(R.id.capture_button);
+        if (button.isEnabled() != wantEnabled) {
+            Log.d(TAG, "setting enabled = " + wantEnabled);
+            button.setEnabled(wantEnabled);
+        }
+    }*/
+
+    /**
+     * Handles onClick for "capture" button.
+     */
+    public void clickCapture(@SuppressWarnings("unused") View unused) {
+        Log.d(TAG, "capture");
+        if (mFileSaveInProgress) {
+            Log.w(TAG, "HEY: file save is already in progress");
+            return;
+        }
+
+        // The button is disabled in onCreate(), and not enabled until the encoder and output
+        // surface is ready, so it shouldn't be possible to get here with a null mCircEncoder.
+        mFileSaveInProgress = true;
+        /*updateControls();
+        TextView tv = (TextView) findViewById(R.id.recording_text);
+        String str = getString(R.string.nowSaving);
+        tv.setText(str);*/
+
+
         mCircEncoder.saveVideo(mOutputFile);
     }
 
-    private void showCameraPreview()
-    {
-        int rotation = getWindowManager().getDefaultDisplay().getRotation();
-        int degrees = 0;
-        switch (rotation) {
-            case Surface.ROTATION_0:
-                degrees = 0;
-                break; // Natural orientation
-            case Surface.ROTATION_90:
-                degrees = 90;
-                break; // Landscape left
-            case Surface.ROTATION_180:
-                degrees = 180;
-                break;// Upside down
-            case Surface.ROTATION_270:
-                degrees = 270;
-                break;// Landscape right
-        }
-        int displayRotation;
-        Camera.CameraInfo camInfo = new Camera.CameraInfo();
-        Camera.getCameraInfo(cameraId, camInfo);
-        int cameraRotationOffset = camInfo.orientation;
-        if (isFrontFacingCam) {
-            displayRotation = (cameraRotationOffset + degrees) % 360;
-            displayRotation = (360 - displayRotation) % 360; // compensate
-            // the
-            // mirror
-        } else { // back-facing
-            displayRotation = (cameraRotationOffset - degrees + 360) % 360;
-        }
-
-        Log.v(TAG, "rotation cam / phone = displayRotation: " + cameraRotationOffset + " / " + degrees + " = "
-                + displayRotation);
-
-        mCamera.setDisplayOrientation(displayRotation);
-
-        int rotate;
-        if (isFrontFacingCam) {
-            rotate = (360 + cameraRotationOffset + degrees) % 360;
-            //rotate=180;
-        } else {
-            rotate = (360 + cameraRotationOffset - degrees) % 360;
-        }
-
-        Log.v(TAG, "screenshot rotation: " + cameraRotationOffset + " / " + degrees + " = " + rotate);
-
-        Camera.Parameters parameters = mCamera.getParameters();
-        parameters.setRotation(rotate);
-        mCamera.setParameters(parameters);
-        Log.d(TAG, "starting camera preview");
-        try {
-            mCamera.setPreviewTexture(mCameraTexture);
-        } catch (IOException ioe) {
-            throw new RuntimeException(ioe);
-        }
-        mCamera.startPreview();
-
-    }
     /**
      * The file save has completed.  We can resume recording.
      */
@@ -400,7 +315,10 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             throw new RuntimeException("WEIRD: got fileSaveCmplete when not in progress");
         }
         mFileSaveInProgress = false;
-        String str;
+/*        updateControls();
+        TextView tv = (TextView) findViewById(R.id.recording_text);*/
+        String str = getString(R.string.nowRecording);
+        //tv.setText(str);
 
         if (status == 0) {
             str = getString(R.string.recordingSucceeded);
@@ -416,12 +334,13 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
      */
     private void updateBufferStatus(long durationUsec) {
         mSecondsOfVideo = durationUsec / 1000000.0f;
+        //updateControls();
     }
 
 
     @Override   // SurfaceHolder.Callback
     public void surfaceCreated(SurfaceHolder holder) {
-        Log.d(TAG, "surfCreatd holder" + holder);
+        Log.d(TAG, "surfaceCreated holder=" + holder);
 
         // Set up everything that requires an EGL context.
         //
@@ -440,10 +359,26 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         mCameraTexture = new SurfaceTexture(mTextureId);
         mCameraTexture.setOnFrameAvailableListener(this);
 
-        showCameraPreview();
+        Log.d(TAG, "starting camera preview");
+        try {
+            mCamera.setPreviewTexture(mCameraTexture);
+        } catch (IOException ioe) {
+            throw new RuntimeException(ioe);
+        }
+        mCamera.startPreview();
+
         // TODO: adjust bit rate based on frame rate?
         // TODO: adjust video width/height based on what we're getting from the camera preview?
         //       (can we guarantee that camera preview size is compatible with AVC video encoder?)
+        try {
+            mCircEncoder = new CircularEncoder(VIDEO_WIDTH, VIDEO_HEIGHT, 6000000,
+                    30, 30, mHandler);
+        } catch (IOException ioe) {
+            throw new RuntimeException(ioe);
+        }
+        mEncoderSurface = new WindowSurface(mEglCore, mCircEncoder.getInputSurface(), true);
+
+        //updateControls();
     }
 
     @Override   // SurfaceHolder.Callback
@@ -496,7 +431,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         mDisplaySurface.swapBuffers();
 
         // Send it to the video encoder.
-        if (mRecordinProgress) {
+        if (!mFileSaveInProgress) {
             mEncoderSurface.makeCurrent();
             GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
             mFullFrameBlit.drawFrame(mTextureId, mTmpMatrix);
