@@ -115,7 +115,7 @@ public class CircularEncoder {
         mInputSurface = mEncoder.createInputSurface();
         mEncoder.start();
 
-        prepareAudioEncoder();
+        //prepareAudioEncoder();
         // Start the encoder thread last.  That way we're sure it can see all of the state
         // we've initialized.
         mEncoderThread = new EncoderThread(mEncoder, encBuffer, cb);
