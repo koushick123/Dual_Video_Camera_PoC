@@ -528,6 +528,7 @@ public class AudioVideoRecording extends AppCompatActivity implements SurfaceHol
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
+            Log.d(TAG,"on Frame available");
             mainHandler.sendEmptyMessage(FRAME_AVAILABLE);
     }
 
