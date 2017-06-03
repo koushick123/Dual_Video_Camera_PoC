@@ -1,7 +1,6 @@
 package com.dual_camera_video_mock;
 
 import android.app.Activity;
-import android.content.res.Configuration;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.opengl.GLES20;
@@ -9,11 +8,11 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
-import android.view.Display;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
-import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
@@ -36,9 +35,9 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         SurfaceTexture.OnFrameAvailableListener {
     private static final String TAG = "ContinuousCaptureActivity";
 
-    private static int VIDEO_WIDTH = 1280;  // dimensions for 720p video
-    private static int VIDEO_HEIGHT = 720;
-    private static final int DESIRED_PREVIEW_FPS = 30;
+    private static final int VIDEO_WIDTH = 1280;  // dimensions for 720p video
+    private static final int VIDEO_HEIGHT = 720;
+    private static final int DESIRED_PREVIEW_FPS = 15;
 
     private EglCore mEglCore;
     private WindowSurface mDisplaySurface;
@@ -100,8 +99,8 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             }
 
             switch (msg.what) {
-                /*case MSG_BLINK_TEXT: {
-                    TextView tv = (TextView) activity.findViewById(R.id.);
+                case MSG_BLINK_TEXT: {
+                    TextView tv = (TextView) activity.findViewById(R.id.recording_text);
 
                     // Attempting to make it blink by using setEnabled() doesn't work --
                     // it just changes the color.  We want to change the visibility.
@@ -116,7 +115,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
                     int delay = (visibility == View.VISIBLE) ? 1000 : 200;
                     sendEmptyMessageDelayed(MSG_BLINK_TEXT, delay);
                     break;
-                }*/
+                }
                 case MSG_FRAME_AVAILABLE: {
                     activity.drawFrame();
                     break;
@@ -147,11 +146,11 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         sh.addCallback(this);
 
         mHandler = new MainHandler(this);
-        //mHandler.sendEmptyMessageDelayed(MainHandler.MSG_BLINK_TEXT, 1500);
+        mHandler.sendEmptyMessageDelayed(MainHandler.MSG_BLINK_TEXT, 1500);
 
         mOutputFile = new File(getFilesDir(), "continuous-capture.mp4");
         mSecondsOfVideo = 0.0f;
-        //updateControls();
+        updateControls();
     }
 
     @Override
@@ -241,19 +240,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
 
         // Set the preview aspect ratio.
         AspectFrameLayout layout = (AspectFrameLayout) findViewById(R.id.continuousCapture_afl);
-        //layout.setAspectRatio((double) cameraPreviewSize.width / cameraPreviewSize.height);
-        Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
-        int orientation = display.getOrientation();
-        if(orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            layout.setAspectRatio((double) 1280 / 720);
-            VIDEO_HEIGHT=720;
-            VIDEO_WIDTH=1280;
-        }
-        else{
-            layout.setAspectRatio((double) 720 / 1280);
-            VIDEO_HEIGHT=1280;
-            VIDEO_WIDTH=720;
-        }
+        layout.setAspectRatio((double) cameraPreviewSize.width / cameraPreviewSize.height);
     }
 
     /**
@@ -271,7 +258,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
     /**
      * Updates the current state of the controls.
      */
-    /*private void updateControls() {
+    private void updateControls() {
         String str = getString(R.string.secondsOfVideo, mSecondsOfVideo);
         TextView tv = (TextView) findViewById(R.id.capturedVideoDesc_text);
         tv.setText(str);
@@ -282,7 +269,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             Log.d(TAG, "setting enabled = " + wantEnabled);
             button.setEnabled(wantEnabled);
         }
-    }*/
+    }
 
     /**
      * Handles onClick for "capture" button.
@@ -297,10 +284,10 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         // The button is disabled in onCreate(), and not enabled until the encoder and output
         // surface is ready, so it shouldn't be possible to get here with a null mCircEncoder.
         mFileSaveInProgress = true;
-        /*updateControls();
+        updateControls();
         TextView tv = (TextView) findViewById(R.id.recording_text);
         String str = getString(R.string.nowSaving);
-        tv.setText(str);*/
+        tv.setText(str);
 
 
         mCircEncoder.saveVideo(mOutputFile);
@@ -315,10 +302,10 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
             throw new RuntimeException("WEIRD: got fileSaveCmplete when not in progress");
         }
         mFileSaveInProgress = false;
-/*        updateControls();
-        TextView tv = (TextView) findViewById(R.id.recording_text);*/
+        updateControls();
+        TextView tv = (TextView) findViewById(R.id.recording_text);
         String str = getString(R.string.nowRecording);
-        //tv.setText(str);
+        tv.setText(str);
 
         if (status == 0) {
             str = getString(R.string.recordingSucceeded);
@@ -334,7 +321,7 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
      */
     private void updateBufferStatus(long durationUsec) {
         mSecondsOfVideo = durationUsec / 1000000.0f;
-        //updateControls();
+        updateControls();
     }
 
 
@@ -372,13 +359,13 @@ public class ContinuousCaptureActivity extends Activity implements SurfaceHolder
         //       (can we guarantee that camera preview size is compatible with AVC video encoder?)
         try {
             mCircEncoder = new CircularEncoder(VIDEO_WIDTH, VIDEO_HEIGHT, 6000000,
-                    30, 30, mHandler);
+                    mCameraPreviewThousandFps / 1000, 7, mHandler);
         } catch (IOException ioe) {
             throw new RuntimeException(ioe);
         }
         mEncoderSurface = new WindowSurface(mEglCore, mCircEncoder.getInputSurface(), true);
 
-        //updateControls();
+        updateControls();
     }
 
     @Override   // SurfaceHolder.Callback

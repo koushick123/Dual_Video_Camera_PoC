@@ -1,10 +1,14 @@
 package com.dual_camera_video_mock;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
 import android.media.AudioRecord;
 import android.media.CamcorderProfile;
 import android.media.MediaCodec;
@@ -34,6 +38,7 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ImageButton;
 import android.widget.Toast;
@@ -48,7 +53,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-public class Recording extends AppCompatActivity implements SurfaceHolder.Callback, SurfaceTexture.OnFrameAvailableListener{
+public class Recording extends AppCompatActivity implements SurfaceHolder.Callback, SurfaceTexture.OnFrameAvailableListener, SensorEventListener {
 
     private int MY_PERMISSIONS_REQUEST_CAMERA=0;
     private int MY_PERMISSIONS_REQUEST_AUDIO=1;
@@ -190,6 +195,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     boolean VERBOSE=false;
     //Thread audio;
     Thread video;
+    /*private final SensorManager mSensorManager;
+    private final Sensor mAccelerometer;*/
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -225,6 +232,14 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
     }
 
+    /*public Recording(Sensor mAccelerometer, SensorManager mSensorManager) {
+        this.mAccelerometer = mAccelerometer;
+        this.mSensorManager = mSensorManager;
+    }*/
+
+    public Recording() {
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -233,6 +248,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         checkForPermissions();
         final ImageButton recordButton = (ImageButton)findViewById(R.id.record_button);
         recordButton.setColorFilter(Color.DKGRAY);
+        final Recording recording = this;
         recordButton.setOnClickListener(new View.OnClickListener(){
             @Override
             public void onClick(View view)
@@ -243,6 +259,12 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     //prepareMuxer();
                     //recordHandler.sendEmptyMessage(RECORD_START);
                     isRecording=true;
+                    /*Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
+                    int orientation = display.getOrientation();
+                    Log.d(TAG,"Orientation == "+orientation);*/
+                    //if(orientation == Configuration.ORIENTATION_PORTRAIT) {
+                        //setCameraDisplayOrientation(recording,cameraId,mCamera);
+                    //}
                 }
                 else{
                     isRecording=false;
@@ -270,6 +292,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             cameraHandler.sendEmptyMessage(SHUTDOWN);
         }
         releaseCamera();
+        //mSensorManager.unregisterListener(this);
         if(videoCodec!=null) {
             videoCodec.release();
             videoCodec = null;
@@ -285,7 +308,16 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         super.onResume();
         Log.d(TAG,"Setting up camera");
         //checkForPermissions();
+        //mSensorManager.registerListener(this, mAccelerometer, SensorManager.SENSOR_DELAY_NORMAL);
         setupCamera();
+    }
+
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+    }
+
+    public void onSensorChanged(SensorEvent event) {
+        Log.d(TAG,"Sensor changed == "+event.sensor);
+        Log.d(TAG,"Sensor changed == "+event.values);
     }
 
     private void releaseCamera() {
@@ -407,8 +439,10 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         getWindowManager().getDefaultDisplay().getMetrics(metrics);
         Log.d(TAG,"Width = "+metrics.widthPixels);
         Log.d(TAG,"Height = "+metrics.heightPixels);
-        Log.d(TAG,"SCREEN Aspect Ratio = "+(double)metrics.widthPixels/(double)metrics.heightPixels);
-        double screenAspectRatio = (double)metrics.widthPixels/(double)metrics.heightPixels;
+        //Aspect ratio needs to be reversed, if orientation is portrait.
+        Log.d(TAG,"SCREEN Aspect Ratio = "+(double)metrics.heightPixels/(double)metrics.widthPixels);
+        double screenAspectRatio = (double)metrics.heightPixels/(double)metrics.widthPixels;
+        //double screenAspectRatio = (double)metrics.widthPixels/(double)metrics.heightPixels;
         List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
 
         //If none of the camera preview size will (closely) match with screen resolution, default it to take the first preview size value.
@@ -426,21 +460,55 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
         }
         Log.d(TAG,"HEIGTH == "+VIDEO_HEIGHT+", WIDTH == "+VIDEO_WIDTH);
+        double videoAspectRatio = (double)VIDEO_WIDTH/(double)VIDEO_HEIGHT;
         parameters.setPreviewSize(VIDEO_WIDTH,VIDEO_HEIGHT);
         parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
         parameters.setRecordingHint(true);
+        //parameters.setRotation(270);
         mCamera.setParameters(parameters);
+        Log.d(TAG,"Orientation == "+info.orientation);
+        setCameraDisplayOrientation(this,cameraId,mCamera);
         // Set the preview aspect ratio.
-        /*AspectFrameLayout layout = (AspectFrameLayout) findViewById(R.id.continuousCapture_afl);
-        layout.setAspectRatio((double) VIDEO_WIDTH / VIDEO_HEIGHT);*/
-        /*Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
-        int orientation = display.getOrientation();
-        if(orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            layout.setAspectRatio((double) VIDEO_WIDTH / VIDEO_HEIGHT);
+        ViewGroup.LayoutParams layoutParams = cameraView.getLayoutParams();
+        int temp = VIDEO_HEIGHT;
+        VIDEO_HEIGHT = VIDEO_WIDTH;
+        VIDEO_WIDTH = temp;
+        /*layoutParams.height = VIDEO_WIDTH / (int)videoAspectRatio;
+        layoutParams.width = (int)videoAspectRatio * VIDEO_HEIGHT;*/
+        layoutParams.height = VIDEO_HEIGHT;
+        layoutParams.width = VIDEO_WIDTH;
+        Log.d(TAG,"LP Height = "+layoutParams.height);
+        Log.d(TAG,"LP Width = "+layoutParams.width);
+        /*temp = VIDEO_HEIGHT;
+        VIDEO_HEIGHT = VIDEO_WIDTH;
+        VIDEO_WIDTH = temp;*/
+    }
+
+    public void setCameraDisplayOrientation(Activity activity,
+                                                   int cameraId, android.hardware.Camera camera) {
+        android.hardware.Camera.CameraInfo info =
+                new android.hardware.Camera.CameraInfo();
+        android.hardware.Camera.getCameraInfo(cameraId, info);
+        int rotation = activity.getWindowManager().getDefaultDisplay()
+                .getRotation();
+        int degrees = 0;
+        Log.d(TAG,"Rotation = "+rotation);
+        switch (rotation) {
+            case Surface.ROTATION_0: degrees = 0; break;
+            case Surface.ROTATION_90: degrees = 90; break;
+            case Surface.ROTATION_180: degrees = 180; break;
+            case Surface.ROTATION_270: degrees = 270; break;
         }
-        else{
-            layout.setAspectRatio((double) VIDEO_HEIGHT / VIDEO_WIDTH);
-        }*/
+
+        int result;
+        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            result = (info.orientation + degrees) % 360;
+            result = (360 - result) % 360;  // compensate the mirror
+        } else {  // back-facing
+            result = (info.orientation - degrees + 360) % 360;
+        }
+        Log.d(TAG,"Rotate by "+result);
+        camera.setDisplayOrientation(result);
     }
 
     private void showPreview()
@@ -715,37 +783,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             GLES20.glUseProgram(0);
         }
 
-        void drawToEncoder(float[] mvpMatrix, int firstVertex,
-                           int vertexCount,
-                           float[] texMatrix, int textureId)
-        {
-            // Select the program.
-            GLES20.glUseProgram(mProgramHandle);
-            GlUtil.checkGlError("glUseProgram");
-
-            // Set the texture.
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(mTextureTarget, textureId);
-
-            // Copy the model / view / projection matrix over.
-            GLES20.glUniformMatrix4fv(muMVPMatrixLoc, 1, false, mvpMatrix, 0);
-            GlUtil.checkGlError("glUniformMatrix4fv");
-
-            // Copy the texture transformation matrix over.
-            GLES20.glUniformMatrix4fv(muTexMatrixLoc, 1, false, texMatrix, 0);
-            GlUtil.checkGlError("glUniformMatrix4fv");
-
-            // Draw the rect.
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, firstVertex, vertexCount);
-            GlUtil.checkGlError("glDrawArrays");
-
-            // Done -- disable vertex array, texture, and program.
-            GLES20.glDisableVertexAttribArray(maPositionLoc);
-            GLES20.glDisableVertexAttribArray(maTextureCoordLoc);
-            GLES20.glBindTexture(mTextureTarget, 0);
-            GLES20.glUseProgram(0);
-        }
-
         /**
          * Allocates a direct float buffer, and populates it with the float array data.
          */
@@ -771,8 +808,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 //Fill the surfaceview with Camera frame
                 int viewWidth = cameraView.getWidth();
                 int viewHeight = cameraView.getHeight();
-                if (frameCount >= 0) {
+                if (frameCount == 0) {
                     if(VERBOSE)Log.d(TAG, "FRAME Count = "+frameCount);
+                    Log.d(TAG,"SV Width == "+viewWidth+", SV Height == "+viewHeight);
                 }
                 GLES20.glViewport(0, 0, viewWidth, viewHeight);
                 draw(IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
@@ -787,8 +825,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         makeCurrent(encoderSurface);
                         if(VERBOSE)Log.d(TAG,"Made encoder surface current");
                         GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
-                        /*drawToEncoder(IDENTITY_MATRIX,  0, (FULL_RECTANGLE_COORDS.length / 2),mTmpMatrix,
-                                 mTextureId);*/
                         draw(IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
                                 createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
                         if(VERBOSE)Log.d(TAG,"Populated to encoder");
@@ -849,11 +885,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
     class VideoEncoder extends Thread
     {
-        int programHandle;
-        int positionLoc;
-        int textureCoordLoc;
-        int MVPMatrixLoc;
-        int texMatrixLoc;
         int count=0;
         ArrayList<FrameData> frames = new ArrayList<>();
         int trackIndex=0;
@@ -864,16 +895,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             videoEncoderHandler = new VideoEncoderHandler(this);
             setupVideoRecorder();
             prepareMuxer();
-            /*prepareEGLContext();
-            programHandle = GlUtil.createProgram(ENCODER_VERTEX_SHADER , ENCODER_FRAGMENT_SHADER_EXT);
-            positionLoc = GLES20.glGetAttribLocation(programHandle, "enc_aPosition");
-            GlUtil.checkLocation(positionLoc, "enc_aPosition");
-            textureCoordLoc = GLES20.glGetAttribLocation(programHandle, "enc_aTextureCoord");
-            GlUtil.checkLocation(textureCoordLoc, "enc_aTextureCoord");
-            MVPMatrixLoc = GLES20.glGetUniformLocation(programHandle, "enc_uMVPMatrix");
-            GlUtil.checkLocation(MVPMatrixLoc, "enc_uMVPMatrix");
-            texMatrixLoc = GLES20.glGetUniformLocation(programHandle, "enc_uTexMatrix");
-            GlUtil.checkLocation(texMatrixLoc, "enc_uTexMatrix");*/
             Log.d(TAG,"Video encoder ready to accept frames");
             synchronized (renderObj){
                 isReady=true;
@@ -881,22 +902,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
             Looper.loop();
             Log.d(TAG,"Video encoder STOPPED");
-        }
-
-        void prepareEGLContext()
-        {
-            EGLConfig config = getConfig(FLAG_RECORDABLE, 2);
-            if (config == null) {
-                throw new RuntimeException("Unable to find a suitable EGLConfig");
-            }
-            int[] attrib2_list = {
-                    EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
-                    EGL14.EGL_NONE
-            };
-            //Create a SHARED context
-            encoderEGLContext = EGL14.eglCreateContext(mEGLDisplay, config, EGL14.EGL_NO_CONTEXT,
-                    attrib2_list, 0);
-            checkEglError("eglCreateContext");
         }
 
         private void prepareWindowSurface(Surface surface)
@@ -984,100 +989,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
         }
 
-        /**
-         * Issues the draw call.  Does the full setup on every call.
-         *
-         * @param mvpMatrix The 4x4 projection matrix.
-         * @param vertexBuffer Buffer with vertex position data.
-         * @param firstVertex Index of first vertex to use in vertexBuffer.
-         * @param vertexCount Number of vertices in vertexBuffer.
-         * @param coordsPerVertex The number of coordinates per vertex (e.g. x,y is 2).
-         * @param vertexStride Width, in bytes, of the position data for each vertex (often
-         *        vertexCount * sizeof(float)).
-         * @param texMatrix A 4x4 transformation matrix for texture coords.  (Primarily intended
-         *        for use with SurfaceTexture.)
-         * @param texBuffer Buffer with vertex texture data.
-         * @param texStride Width, in bytes, of the texture data for each vertex.
-         */
-        private void draw(float[] mvpMatrix, FloatBuffer vertexBuffer, int firstVertex,
-                          int vertexCount, int coordsPerVertex, int vertexStride,
-                          float[] texMatrix, FloatBuffer texBuffer, int textureId, int texStride) {
-            GlUtil.checkGlError("draw start");
-
-            // Select the program.
-            GLES20.glUseProgram(programHandle);
-            GlUtil.checkGlError("glUseProgram");
-
-            // Set the texture.
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(mTextureTarget, textureId);
-
-            // Copy the model / view / projection matrix over.
-            GLES20.glUniformMatrix4fv(MVPMatrixLoc, 1, false, mvpMatrix, 0);
-            GlUtil.checkGlError("glUniformMatrix4fv");
-
-            // Copy the texture transformation matrix over.
-            GLES20.glUniformMatrix4fv(muTexMatrixLoc, 1, false, texMatrix, 0);
-            GlUtil.checkGlError("glUniformMatrix4fv");
-
-            // Enable the "aPosition" vertex attribute.
-            GLES20.glEnableVertexAttribArray(maPositionLoc);
-            GlUtil.checkGlError("glEnableVertexAttribArray");
-
-            // Connect vertexBuffer to "aPosition".
-            GLES20.glVertexAttribPointer(maPositionLoc, coordsPerVertex,
-                    GLES20.GL_FLOAT, false, vertexStride, vertexBuffer);
-            GlUtil.checkGlError("glVertexAttribPointer");
-
-            // Enable the "aTextureCoord" vertex attribute.
-            GLES20.glEnableVertexAttribArray(maTextureCoordLoc);
-            GlUtil.checkGlError("glEnableVertexAttribArray");
-
-            // Connect texBuffer to "aTextureCoord".
-            GLES20.glVertexAttribPointer(maTextureCoordLoc, 2,
-                    GLES20.GL_FLOAT, false, texStride, texBuffer);
-            GlUtil.checkGlError("glVertexAttribPointer");
-
-            // Draw the rect.
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, firstVertex, vertexCount);
-            GlUtil.checkGlError("glDrawArrays");
-
-            // Done -- disable vertex array, texture, and program.
-            GLES20.glDisableVertexAttribArray(maPositionLoc);
-            GLES20.glDisableVertexAttribArray(maTextureCoordLoc);
-            GLES20.glBindTexture(mTextureTarget, 0);
-            GLES20.glUseProgram(0);
-        }
-
-        /**
-         * Allocates a direct float buffer, and populates it with the float array data.
-         */
-        private FloatBuffer createFloatBuffer(float[] coords) {
-            // Allocate a direct ByteBuffer, using 4 bytes per float, and copy coords into it.
-            ByteBuffer bb = ByteBuffer.allocateDirect(coords.length * SIZEOF_FLOAT);
-            bb.order(ByteOrder.nativeOrder());
-            FloatBuffer fb = bb.asFloatBuffer();
-            fb.put(coords);
-            fb.position(0);
-            return fb;
-        }
-
-        private void makeCurrent(EGLSurface surface)
-        {
-            EGL14.eglMakeCurrent(mEGLDisplay, surface, surface, encoderEGLContext);
-        }
-
-        void recordFrame()
-        {
-            makeCurrent(encoderSurface);
-            GLES20.glViewport(0, 0, camcorderProfile.videoFrameWidth, camcorderProfile.videoFrameHeight);
-            draw(IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
-                    createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
-            Log.d(TAG, "Received Frames...."+videoCodec.getOutputBuffers().length);
-            EGLExt.eglPresentationTimeANDROID(mEGLDisplay, encoderSurface, surfaceTexture.getTimestamp());
-            EGL14.eglSwapBuffers(mEGLDisplay, encoderSurface);
-        }
-
         private void drain()
         {
             if(videoCodec != null) {
@@ -1142,9 +1053,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 VideoEncoder enc = encoder.get();
                 switch(msg.what)
                 {
-                    case RECORD_START:
-                        enc.recordFrame();
-                        break;
                     case RECORD_STOP:
                         enc.drain();
                         enc.closeEncoder();
@@ -1170,14 +1078,14 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             mediaMuxer = mMuxer;
         }
 
-        synchronized public void recordMedia(MediaCodec mediaCodec, MediaCodec.BufferInfo bufferInfo, boolean audioTrack,int trackIndex,ByteBuffer mediaData)
+        public void recordMedia(MediaCodec mediaCodec, MediaCodec.BufferInfo bufferInfo, boolean audioTrack,int trackIndex,ByteBuffer mediaData)
         {
             //Extract encoded data
             //Log.d(TAG,"Recording for "+(audioTrack ? "AUDIO" : "VIDEO"));
             mediaMuxer.writeSampleData(trackIndex, mediaData, bufferInfo);
         }
 
-        synchronized public int addTrack(MediaFormat mediaFormat,boolean audioTrack)
+        public int addTrack(MediaFormat mediaFormat,boolean audioTrack)
         {
             Log.d(TAG,"adding track for "+(audioTrack ? "AUDIO" : "VIDEO"));
             return mediaMuxer.addTrack(mediaFormat);
@@ -1191,7 +1099,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
         }
 
-        synchronized public void startMuxer()
+        public void startMuxer()
         {
             if(mediaMuxer!=null) {
                 if (!muxerStarted) {
@@ -1208,15 +1116,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     mediaMuxer.stop();
                     muxerStarted=false;
                 }
-            }
-        }
-
-        private void releaseCodec()
-        {
-            if(mediaCodec!=null){
-                mediaCodec.stop();
-                mediaCodec.release();
-                mediaCodec=null;
             }
         }
     }
