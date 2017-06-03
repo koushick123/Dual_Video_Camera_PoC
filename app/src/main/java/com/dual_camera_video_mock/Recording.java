@@ -259,6 +259,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     //prepareMuxer();
                     //recordHandler.sendEmptyMessage(RECORD_START);
                     isRecording=true;
+                    //mCamera.setDisplayOrientation(270);
                     /*Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
                     int orientation = display.getOrientation();
                     Log.d(TAG,"Orientation == "+orientation);*/
@@ -467,7 +468,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         //parameters.setRotation(270);
         mCamera.setParameters(parameters);
         Log.d(TAG,"Orientation == "+info.orientation);
-        setCameraDisplayOrientation(this,cameraId,mCamera);
+        //setCameraDisplayOrientation(this,cameraId,mCamera);
+        //Log.d(TAG,"Orientation post change == "+info.orientation);
         // Set the preview aspect ratio.
         ViewGroup.LayoutParams layoutParams = cameraView.getLayoutParams();
         int temp = VIDEO_HEIGHT;
@@ -479,9 +481,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         layoutParams.width = VIDEO_WIDTH;
         Log.d(TAG,"LP Height = "+layoutParams.height);
         Log.d(TAG,"LP Width = "+layoutParams.width);
-        /*temp = VIDEO_HEIGHT;
+        temp = VIDEO_HEIGHT;
         VIDEO_HEIGHT = VIDEO_WIDTH;
-        VIDEO_WIDTH = temp;*/
+        VIDEO_WIDTH = temp;
     }
 
     public void setCameraDisplayOrientation(Activity activity,
@@ -965,8 +967,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             if(VERBOSE) {
                 Log.d(TAG, "VID Bit rate = " + camcorderProfile.videoBitRate);
                 Log.d(TAG, "VID videoFrameRate = " + camcorderProfile.videoFrameRate);
-                Log.d(TAG, "VID videoFrameHeight = " + camcorderProfile.videoFrameHeight);
-                Log.d(TAG, "VID videoFrameWidth = " + camcorderProfile.videoFrameWidth);
                 Log.d(TAG, "AUD audioBitRate = " + camcorderProfile.audioBitRate);
                 Log.d(TAG, "AUD audioChannels = " + camcorderProfile.audioChannels);
                 Log.d(TAG, "AUD audioSampleRate = " + camcorderProfile.audioSampleRate);
