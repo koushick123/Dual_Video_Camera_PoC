@@ -259,7 +259,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     //prepareMuxer();
                     //recordHandler.sendEmptyMessage(RECORD_START);
                     isRecording=true;
-                    //mCamera.setDisplayOrientation(270);
                     /*Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
                     int orientation = display.getOrientation();
                     Log.d(TAG,"Orientation == "+orientation);*/
@@ -461,14 +460,13 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
         }
         Log.d(TAG,"HEIGTH == "+VIDEO_HEIGHT+", WIDTH == "+VIDEO_WIDTH);
+        boolean portrait=false;
         double videoAspectRatio = (double)VIDEO_WIDTH/(double)VIDEO_HEIGHT;
         parameters.setPreviewSize(VIDEO_WIDTH,VIDEO_HEIGHT);
         parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
         parameters.setRecordingHint(true);
-        //parameters.setRotation(270);
         mCamera.setParameters(parameters);
         Log.d(TAG,"Orientation == "+info.orientation);
-        //setCameraDisplayOrientation(this,cameraId,mCamera);
         //Log.d(TAG,"Orientation post change == "+info.orientation);
         // Set the preview aspect ratio.
         ViewGroup.LayoutParams layoutParams = cameraView.getLayoutParams();
@@ -481,9 +479,16 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         layoutParams.width = VIDEO_WIDTH;
         Log.d(TAG,"LP Height = "+layoutParams.height);
         Log.d(TAG,"LP Width = "+layoutParams.width);
+        if(portrait){
+            mCamera.setDisplayOrientation(90);
+        }
+        else{
+            //The preview for landscape will look incorrect, since activity and camera are not oriented in the same direction.
+            //But, video will be recorded correctly.
         temp = VIDEO_HEIGHT;
         VIDEO_HEIGHT = VIDEO_WIDTH;
         VIDEO_WIDTH = temp;
+        }
     }
 
     public void setCameraDisplayOrientation(Activity activity,
