@@ -139,29 +139,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     "    vTextureCoord = (uTexMatrix * aTextureCoord).xy;\n" +
                     "}\n";
 
-    private static final String ENCODER_VERTEX_SHADER =
-            "uniform mat4 enc_uMVPMatrix;\n" +
-                    "uniform mat4 enc_uTexMatrix;\n" +
-                    "attribute vec4 enc_aPosition;\n" +
-                    "attribute vec4 enc_aTextureCoord;\n" +
-                    "varying vec2 enc_vTextureCoord;\n" +
-                    "void main() {\n" +
-                    "    gl_Position = enc_uMVPMatrix * enc_aPosition;\n" +
-                    "    vTextureCoord = (enc_uTexMatrix * enc_aTextureCoord).xy;\n" +
-                    "}\n";
-
     // Simple fragment shader for use with external 2D textures (e.g. what we get from
     // SurfaceTexture).
     private static final String FRAGMENT_SHADER_EXT =
-            "#extension GL_OES_EGL_image_external : require\n" +
-                    "precision mediump float;\n" +
-                    "varying vec2 vTextureCoord;\n" +
-                    "uniform samplerExternalOES sTexture;\n" +
-                    "void main() {\n" +
-                    "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
-                    "}\n";
-
-    private static final String ENCODER_FRAGMENT_SHADER_EXT =
             "#extension GL_OES_EGL_image_external : require\n" +
                     "precision mediump float;\n" +
                     "varying vec2 vTextureCoord;\n" +
@@ -460,7 +440,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
         }
         Log.d(TAG,"HEIGTH == "+VIDEO_HEIGHT+", WIDTH == "+VIDEO_WIDTH);
-        boolean portrait=false;
+        boolean portrait=true;
         double videoAspectRatio = (double)VIDEO_WIDTH/(double)VIDEO_HEIGHT;
         parameters.setPreviewSize(VIDEO_WIDTH,VIDEO_HEIGHT);
         parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
