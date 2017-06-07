@@ -122,10 +122,12 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     EGLSurface encoderSurface=null;
     private final float[] mTmpMatrix = new float[16];
     public static final float[] IDENTITY_MATRIX;
+    public static final float[] RECORD_IDENTITY_MATRIX;
     static {
         IDENTITY_MATRIX = new float[16];
         Matrix.setIdentityM(IDENTITY_MATRIX, 0);
-    }
+        RECORD_IDENTITY_MATRIX = new float[16];
+        Matrix.setIdentityM(RECORD_IDENTITY_MATRIX, 0);}
 
     // Simple vertex shader, used for all programs.
     private static final String VERTEX_SHADER =
@@ -175,6 +177,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     boolean VERBOSE=false;
     //Thread audio;
     Thread video;
+    boolean portrait=true;
     /*private final SensorManager mSensorManager;
     private final Sensor mAccelerometer;*/
 
@@ -238,6 +241,10 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     //Record here
                     //prepareMuxer();
                     //recordHandler.sendEmptyMessage(RECORD_START);
+                    if(!portrait) {
+                        //Rotate the frame so that it will record correctly in landscape.
+                        Matrix.rotateM(RECORD_IDENTITY_MATRIX, 0, 90f, 0, 0, 1);
+                    }
                     isRecording=true;
                     /*Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
                     int orientation = display.getOrientation();
@@ -252,6 +259,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     //Stop here
                     videoEncoderHandler.sendEmptyMessage(RECORD_STOP);
                     Log.d(TAG,"Recorder thread EXITED...");
+                    //Reset the RECORD Matrix to be portrait.
+                    System.arraycopy(IDENTITY_MATRIX,0,RECORD_IDENTITY_MATRIX,0,IDENTITY_MATRIX.length);
                 }
             }
         });
@@ -440,7 +449,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
         }
         Log.d(TAG,"HEIGTH == "+VIDEO_HEIGHT+", WIDTH == "+VIDEO_WIDTH);
-        boolean portrait=true;
         double videoAspectRatio = (double)VIDEO_WIDTH/(double)VIDEO_HEIGHT;
         parameters.setPreviewSize(VIDEO_WIDTH,VIDEO_HEIGHT);
         parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
@@ -459,10 +467,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         layoutParams.width = VIDEO_WIDTH;
         Log.d(TAG,"LP Height = "+layoutParams.height);
         Log.d(TAG,"LP Width = "+layoutParams.width);
-        if(portrait){
-            mCamera.setDisplayOrientation(90);
-        }
-        else{
+        mCamera.setDisplayOrientation(90);
+        if(!portrait){
             //The preview for landscape will look incorrect, since activity and camera are not oriented in the same direction.
             //But, video will be recorded correctly.
         temp = VIDEO_HEIGHT;
@@ -812,7 +818,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         makeCurrent(encoderSurface);
                         if(VERBOSE)Log.d(TAG,"Made encoder surface current");
                         GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
-                        draw(IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
+                        draw(RECORD_IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
                                 createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
                         if(VERBOSE)Log.d(TAG,"Populated to encoder");
                         videoEncoderHandler.sendEmptyMessage(SAVE_VIDEO);
