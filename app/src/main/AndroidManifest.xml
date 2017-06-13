@@ -11,6 +11,8 @@
         android:required="true" />
     <uses-feature android:name="android.hardware.camera" />
     <uses-feature android:name="android.hardware.camera.autofocus" />
+    <uses-feature android:name="android.hardware.sensor.accelerometer"
+        android:required="true"/>
 
     <application
         android:allowBackup="true"
@@ -28,15 +30,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-        </activity>
-        -->
-        <!--
-        <activity android:name=".Main2Activity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
         </activity>
         -->
         <!--
@@ -69,7 +62,8 @@
             </intent-filter>
         </activity>-->
         <activity android:name=".Recording"
-            android:screenOrientation="nosensor">
+            android:screenOrientation="nosensor"
+            >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

@@ -2,13 +2,13 @@ package com.dual_camera_video_mock;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.AudioRecord;
 import android.media.CamcorderProfile;
 import android.media.MediaCodec;
@@ -34,6 +34,7 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.OrientationEventListener;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -53,7 +54,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-public class Recording extends AppCompatActivity implements SurfaceHolder.Callback, SurfaceTexture.OnFrameAvailableListener, SensorEventListener {
+public class Recording extends AppCompatActivity implements SurfaceHolder.Callback, SurfaceTexture.OnFrameAvailableListener{
 
     private int MY_PERMISSIONS_REQUEST_CAMERA=0;
     private int MY_PERMISSIONS_REQUEST_AUDIO=1;
@@ -69,20 +70,19 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     Object recordSync = new Object();
     private static int VIDEO_WIDTH = 1280;  // dimensions for 720p video
     private static int VIDEO_HEIGHT = 720;
+    //Safe to assume every camera would support 15 fps.
+    int MIN_FPS = 15;
+    int MAX_FPS = 15;
     private SurfaceView cameraView;
     final int FRAME_AVAILABLE = 1000;
     final int RECORD_STOP = 2000;
     final int RECORD_START = 3000;
     final int SAVE_VIDEO = 4000;
-    //final int RECORD_COMPLETED = 4000;
-    final int GET_RECORDER = 5000;
     final int SHUTDOWN = 6000;
-    final int GET_READY = 7000;
     SurfaceTexture surfaceTexture;
     private Camera mCamera;
     private EGLDisplay mEGLDisplay = EGL14.EGL_NO_DISPLAY;
     private EGLContext mEGLContext = EGL14.EGL_NO_CONTEXT;
-    private EGLContext encoderEGLContext = EGL14.EGL_NO_CONTEXT;
     private EGLConfig mEGLConfig = null;
     // Android-specific extension.
     private static final int EGL_RECORDABLE_ANDROID = 0x3142;
@@ -161,8 +161,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     public static final int FRAMES_PER_BUFFER = 25; 	// AAC, frame/buffer/sec
     //MediaFormat audioFormat=null;
     MediaFormat videoFormat=null;
-    int TIMEOUT = 10000;
-
+    int TIMEOUT = 0;
     static final String AUDIO_PERMISSION = "android.permission.RECORD_AUDIO";
     static final String CAMERA_PERMISSION = "android.permission.CAMERA";
     final String TAG = this.getClass().getName();
@@ -177,9 +176,14 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     boolean VERBOSE=false;
     //Thread audio;
     Thread video;
-    boolean portrait=true;
-    /*private final SensorManager mSensorManager;
-    private final Sensor mAccelerometer;*/
+    //Keep in landscape by default.
+    boolean portrait=false;
+    int orientation = -1;
+    double screenAspectRatio = -1;
+    OrientationEventListener orientationEventListener;
+    SharedPreferences sharedPreferences;
+    ImageButton recordButton;
+    float rotationAngle = 0.0f;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -215,12 +219,30 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
     }
 
-    /*public Recording(Sensor mAccelerometer, SensorManager mSensorManager) {
-        this.mAccelerometer = mAccelerometer;
-        this.mSensorManager = mSensorManager;
-    }*/
+    public void determineOrientation() {
 
-    public Recording() {
+        if(orientation != -1) {
+            if (((orientation >= 315 && orientation <= 359) || (orientation >= 0 && orientation <= 45)) || (orientation >= 135 && orientation <= 195)) {
+                if (orientation >= 135 && orientation <= 195) {
+                    rotationAngle = 180f;
+                } else {
+                    rotationAngle = 0f;
+                }
+                portrait = true;
+            } else {
+                if (orientation >= 46 && orientation <= 134) {
+                    rotationAngle = 270f;
+                } else {
+                    rotationAngle = 90f;
+                }
+                portrait = false;
+            }
+        }
+        else{
+            //This device is on a flat surface or parallel to the ground. Default to portrait.
+            portrait = true;
+            rotationAngle = 0f;
+        }
     }
 
     @Override
@@ -229,7 +251,15 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         setContentView(R.layout.activity_recording);
         cameraView = (SurfaceView) findViewById(R.id.cameraView);
         checkForPermissions();
-        final ImageButton recordButton = (ImageButton)findViewById(R.id.record_button);
+        orientationEventListener = new OrientationEventListener(this, SensorManager.SENSOR_DELAY_UI){
+            @Override
+            public void onOrientationChanged(int i) {
+                if(orientationEventListener.canDetectOrientation()) {
+                    orientation = i;
+                }
+            }
+        };
+        recordButton = (ImageButton)findViewById(R.id.record_button);
         recordButton.setColorFilter(Color.DKGRAY);
         final Recording recording = this;
         recordButton.setOnClickListener(new View.OnClickListener(){
@@ -237,21 +267,14 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             public void onClick(View view)
             {
                 if(!isRecording){
-                    recordButton.setColorFilter(Color.RED);
-                    //Record here
-                    //prepareMuxer();
-                    //recordHandler.sendEmptyMessage(RECORD_START);
-                    if(!portrait) {
-                        //Rotate the frame so that it will record correctly in landscape.
-                        Matrix.rotateM(RECORD_IDENTITY_MATRIX, 0, 90f, 0, 0, 1);
-                    }
-                    isRecording=true;
-                    /*Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
-                    int orientation = display.getOrientation();
-                    Log.d(TAG,"Orientation == "+orientation);*/
-                    //if(orientation == Configuration.ORIENTATION_PORTRAIT) {
-                        //setCameraDisplayOrientation(recording,cameraId,mCamera);
-                    //}
+                    determineOrientation();
+                    sharedPreferences = getSharedPreferences("dualOrientationMode", Context.MODE_PRIVATE);
+                    SharedPreferences.Editor editor = sharedPreferences.edit();
+                    editor.putBoolean("orientation",portrait);
+                    editor.putBoolean("recreate",true);
+                    editor.putFloat("rotationAngle",rotationAngle);
+                    editor.commit();
+                    recreate();
                 }
                 else{
                     isRecording=false;
@@ -261,11 +284,38 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     Log.d(TAG,"Recorder thread EXITED...");
                     //Reset the RECORD Matrix to be portrait.
                     System.arraycopy(IDENTITY_MATRIX,0,RECORD_IDENTITY_MATRIX,0,IDENTITY_MATRIX.length);
+                    //Reset Rotation angle
+                    rotationAngle = 0f;
                 }
             }
         });
+        checkAndRecord();
         getSupportActionBar().hide();
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+    }
+
+    public boolean checkAndRecord()
+    {
+        sharedPreferences = getSharedPreferences("dualOrientationMode", Context.MODE_PRIVATE);
+        if(sharedPreferences != null && sharedPreferences.contains("recreate") && sharedPreferences.getBoolean("recreate",false)){
+            portrait = sharedPreferences.getBoolean("orientation",true);
+            Log.d(TAG,"Orientation is == "+portrait);
+            SharedPreferences.Editor editor = sharedPreferences.edit();
+            editor.putBoolean("recreate",false);
+            editor.commit();
+            if(sharedPreferences.contains("rotationAngle")) {
+                rotationAngle = sharedPreferences.getFloat("rotationAngle",0f);
+                Log.d(TAG,"Rot angle == "+rotationAngle);
+                Matrix.rotateM(RECORD_IDENTITY_MATRIX, 0, rotationAngle , 0, 0, 1);
+            }
+            recordButton.setColorFilter(Color.RED);
+            isRecording = true;
+        }
+        else{
+            isRecording = false;
+        }
+        Log.d(TAG,"Returning == "+isRecording);
+        return isRecording;
     }
 
     @Override
@@ -274,14 +324,14 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             videoEncoderHandler.sendEmptyMessage(SHUTDOWN);
         }
         Log.d(TAG,"cameraHandler = "+cameraHandler);
-        if(surfaceTexture!=null){
-            surfaceTexture.release();
-        }
         if(cameraHandler!=null) {
             cameraHandler.sendEmptyMessage(SHUTDOWN);
         }
+        if(surfaceTexture!=null){
+            surfaceTexture.release();
+        }
         releaseCamera();
-        //mSensorManager.unregisterListener(this);
+        orientationEventListener.disable();
         if(videoCodec!=null) {
             videoCodec.release();
             videoCodec = null;
@@ -296,17 +346,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     protected void onResume() {
         super.onResume();
         Log.d(TAG,"Setting up camera");
+        orientationEventListener.enable();
         //checkForPermissions();
-        //mSensorManager.registerListener(this, mAccelerometer, SensorManager.SENSOR_DELAY_NORMAL);
         setupCamera();
-    }
-
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {
-    }
-
-    public void onSensorChanged(SensorEvent event) {
-        Log.d(TAG,"Sensor changed == "+event.sensor);
-        Log.d(TAG,"Sensor changed == "+event.values);
     }
 
     private void releaseCamera() {
@@ -411,9 +453,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         Camera.Parameters parameters = mCamera.getParameters();
         List<int[]> fps = parameters.getSupportedPreviewFpsRange();
         Iterator<int[]> iter = fps.iterator();
-        //Safe to assume every camera would support 15 fps.
-        int MIN_FPS = 15;
-        int MAX_FPS = 15;
+
         while(iter.hasNext())
         {
             int[] frames = iter.next();
@@ -429,9 +469,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         Log.d(TAG,"Width = "+metrics.widthPixels);
         Log.d(TAG,"Height = "+metrics.heightPixels);
         //Aspect ratio needs to be reversed, if orientation is portrait.
-        Log.d(TAG,"SCREEN Aspect Ratio = "+(double)metrics.heightPixels/(double)metrics.widthPixels);
-        double screenAspectRatio = (double)metrics.heightPixels/(double)metrics.widthPixels;
-        //double screenAspectRatio = (double)metrics.widthPixels/(double)metrics.heightPixels;
+        screenAspectRatio = 1.0f / ((double)metrics.widthPixels/(double)metrics.heightPixels);
+        Log.d(TAG,"SCREEN Aspect Ratio = "+screenAspectRatio);
         List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
 
         //If none of the camera preview size will (closely) match with screen resolution, default it to take the first preview size value.
@@ -450,31 +489,25 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
         Log.d(TAG,"HEIGTH == "+VIDEO_HEIGHT+", WIDTH == "+VIDEO_WIDTH);
         double videoAspectRatio = (double)VIDEO_WIDTH/(double)VIDEO_HEIGHT;
-        parameters.setPreviewSize(VIDEO_WIDTH,VIDEO_HEIGHT);
+        parameters.setPreviewSize(VIDEO_WIDTH, VIDEO_HEIGHT);
         parameters.setPreviewFpsRange(MIN_FPS,MAX_FPS);
         parameters.setRecordingHint(true);
         mCamera.setParameters(parameters);
-        Log.d(TAG,"Orientation == "+info.orientation);
-        //Log.d(TAG,"Orientation post change == "+info.orientation);
         // Set the preview aspect ratio.
         ViewGroup.LayoutParams layoutParams = cameraView.getLayoutParams();
         int temp = VIDEO_HEIGHT;
         VIDEO_HEIGHT = VIDEO_WIDTH;
         VIDEO_WIDTH = temp;
-        /*layoutParams.height = VIDEO_WIDTH / (int)videoAspectRatio;
-        layoutParams.width = (int)videoAspectRatio * VIDEO_HEIGHT;*/
         layoutParams.height = VIDEO_HEIGHT;
         layoutParams.width = VIDEO_WIDTH;
         Log.d(TAG,"LP Height = "+layoutParams.height);
         Log.d(TAG,"LP Width = "+layoutParams.width);
-        mCamera.setDisplayOrientation(90);
-        if(!portrait){
-            //The preview for landscape will look incorrect, since activity and camera are not oriented in the same direction.
-            //But, video will be recorded correctly.
-        temp = VIDEO_HEIGHT;
-        VIDEO_HEIGHT = VIDEO_WIDTH;
-        VIDEO_WIDTH = temp;
+        if(!portrait) {
+            temp = VIDEO_HEIGHT;
+            VIDEO_HEIGHT = VIDEO_WIDTH;
+            VIDEO_WIDTH = temp;
         }
+        mCamera.setDisplayOrientation(info.orientation);
     }
 
     public void setCameraDisplayOrientation(Activity activity,
@@ -791,7 +824,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
         void drawFrame()
         {
-            if(mEGLConfig!=null) {
+            if(mEGLConfig!=null && mCamera!= null) {
                 makeCurrent(eglSurface);
                 if(VERBOSE) Log.d(TAG,"made current");
                 //Get next frame from camera
