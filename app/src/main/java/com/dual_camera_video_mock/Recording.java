@@ -183,7 +183,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     OrientationEventListener orientationEventListener;
     SharedPreferences sharedPreferences;
     ImageButton recordButton;
+    ImageButton switchButton;
     float rotationAngle = 0.0f;
+    boolean backCamera = true;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -286,6 +288,22 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     //Reset Rotation angle
                     rotationAngle = 0f;
                 }
+            }
+        });
+        switchButton = (ImageButton)findViewById(R.id.switchCam);
+        switchButton.setColorFilter(Color.DKGRAY);
+        switchButton.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view) {
+                if(backCamera){
+                    backCamera = false;
+                }
+                else{
+                    backCamera = true;
+                }
+                releaseCamera();
+                setupCamera();
+                showPreview();
             }
         });
         checkAndRecord();
@@ -442,10 +460,19 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         for(int i=0;i<Camera.getNumberOfCameras();i++)
         {
             Camera.getCameraInfo(i, info);
-            if(info.facing == Camera.CameraInfo.CAMERA_FACING_BACK){
-                mCamera = Camera.open(i);
-                cameraId = i;
-                break;
+            if(backCamera) {
+                if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
+                    mCamera = Camera.open(i);
+                    cameraId = i;
+                    break;
+                }
+            }
+            else{
+                if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                    mCamera = Camera.open(i);
+                    cameraId = i;
+                    break;
+                }
             }
         }
 

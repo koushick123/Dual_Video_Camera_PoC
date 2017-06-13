@@ -26,5 +26,13 @@
         android:background="@null"
         android:scaleType="fitXY"
         android:src="@android:drawable/ic_menu_camera" />
+
+    <ImageButton
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:id="@+id/switchCam"
+        android:background="@null"
+        android:scaleType="fitXY"
+        android:src="@drawable/ic_camera_switch"/>
     <!--</com.dual_camera_video_mock.AspectFrameLayout>-->
 </RelativeLayout>
