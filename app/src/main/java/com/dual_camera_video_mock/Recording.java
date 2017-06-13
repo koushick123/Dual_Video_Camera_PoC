@@ -261,7 +261,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         };
         recordButton = (ImageButton)findViewById(R.id.record_button);
         recordButton.setColorFilter(Color.DKGRAY);
-        final Recording recording = this;
         recordButton.setOnClickListener(new View.OnClickListener(){
             @Override
             public void onClick(View view)
