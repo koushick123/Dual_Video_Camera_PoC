@@ -5,11 +5,6 @@
     android:layout_height="match_parent"
     tools:context=".AudioVideoRecording">
 
-    <!--<com.dual_camera_video_mock.AspectFrameLayout
-        android:id="@+id/continuousCapture_afl"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_centerInParent="true" >-->
     <SurfaceView
         android:id="@+id/cameraView"
         android:layout_width="match_parent"
@@ -33,6 +28,5 @@
         android:id="@+id/switchCam"
         android:background="@null"
         android:scaleType="fitXY"
-        android:src="@drawable/ic_camera_switch"/>
-    <!--</com.dual_camera_video_mock.AspectFrameLayout>-->
+        android:src="@drawable/ic_flip_cam_512"/>
 </RelativeLayout>

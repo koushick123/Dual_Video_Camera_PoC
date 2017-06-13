@@ -301,6 +301,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 else{
                     backCamera = true;
                 }
+                SharedPreferences.Editor editor = sharedPreferences.edit();
+                editor.putBoolean("backCamera",backCamera);
+                editor.commit();
                 releaseCamera();
                 setupCamera();
                 showPreview();
@@ -333,6 +336,15 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
         Log.d(TAG,"Returning == "+isRecording);
         return isRecording;
+    }
+
+    @Override
+    protected void onDestroy() {
+        Log.d(TAG,"onDestroy");
+        SharedPreferences.Editor editor = sharedPreferences.edit();
+        editor.putBoolean("backCamera",true);
+        editor.commit();
+        super.onDestroy();
     }
 
     @Override
@@ -457,6 +469,12 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     private void setupCamera()
     {
         Camera.CameraInfo info = new Camera.CameraInfo();
+        if(sharedPreferences.contains("backCamera")){
+            backCamera = sharedPreferences.getBoolean("backCamera",true);
+        }
+        else{
+            backCamera = true;
+        }
         for(int i=0;i<Camera.getNumberOfCameras();i++)
         {
             Camera.getCameraInfo(i, info);
@@ -533,7 +551,12 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             VIDEO_HEIGHT = VIDEO_WIDTH;
             VIDEO_WIDTH = temp;
         }
-        mCamera.setDisplayOrientation(info.orientation);
+        if(backCamera) {
+            mCamera.setDisplayOrientation(info.orientation);
+        }
+        else{
+            mCamera.setDisplayOrientation(90);
+        }
     }
 
     public void setCameraDisplayOrientation(Activity activity,
