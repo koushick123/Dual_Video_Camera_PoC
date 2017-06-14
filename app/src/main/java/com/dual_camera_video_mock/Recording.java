@@ -1,7 +1,6 @@
 package com.dual_camera_video_mock;
 
 import android.Manifest;
-import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -568,33 +567,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         mCamera.setDisplayOrientation(result);
     }
 
-    public void setCameraDisplayOrientation(Activity activity,
-                                                   int cameraId, android.hardware.Camera camera) {
-        android.hardware.Camera.CameraInfo info =
-                new android.hardware.Camera.CameraInfo();
-        android.hardware.Camera.getCameraInfo(cameraId, info);
-        int rotation = activity.getWindowManager().getDefaultDisplay()
-                .getRotation();
-        int degrees = 0;
-        Log.d(TAG,"Rotation = "+rotation);
-        switch (rotation) {
-            case Surface.ROTATION_0: degrees = 0; break;
-            case Surface.ROTATION_90: degrees = 90; break;
-            case Surface.ROTATION_180: degrees = 180; break;
-            case Surface.ROTATION_270: degrees = 270; break;
-        }
-
-        int result;
-        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-            result = (info.orientation + degrees) % 360;
-            result = (360 - result) % 360;  // compensate the mirror
-        } else {  // back-facing
-            result = (info.orientation - degrees + 360) % 360;
-        }
-        Log.d(TAG,"Rotate by "+result);
-        camera.setDisplayOrientation(result);
-    }
-
     private void showPreview()
     {
         Log.d(TAG, "starting camera preview");
@@ -1074,7 +1046,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
             videoFormat.setInteger(MediaFormat.KEY_BIT_RATE, camcorderProfile.videoBitRate);
             videoFormat.setInteger(MediaFormat.KEY_FRAME_RATE, camcorderProfile.videoFrameRate);
-            videoFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2);
+            videoFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
             try {
                 videoCodec = MediaCodec.createEncoderByType(VIDEO_MIME_TYPE);
                 videoCodec.configure(videoFormat,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);
@@ -1097,10 +1069,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     //Extract encoded data
                     if(VERBOSE)Log.d(TAG, "Retrieve Encoded Data....");
                     videoBufferInd = videoCodec.dequeueOutputBuffer(bufferInfo, TIMEOUT);
-                /*if((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0){
-                    Log.d(TAG,"EOS Reached...");
-                    break;
-                }*/
                     if(VERBOSE)Log.d(TAG, "OUTPUT buffer index = " + videoBufferInd);
                     if (videoBufferInd >= 0) {
                         if (bufferInfo.size != 0) {
@@ -1112,9 +1080,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                             //frames.add(new FrameData(bufferInfo,outputBuffers[videoBufferInd]));
                             mediaMuxerHelper.recordMedia(videoCodec, bufferInfo, false, trackIndex, outputBuffers[videoBufferInd]);
                             videoCodec.releaseOutputBuffer(videoBufferInd, false);
-                                /*if (isEOS || !isRecording) {
-                                    break MAIN_LOOP;
-                                }*/
                         }
                     } else if (videoBufferInd == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
                         outputBuffers = videoCodec.getOutputBuffers();
