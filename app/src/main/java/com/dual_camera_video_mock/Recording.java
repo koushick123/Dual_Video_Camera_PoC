@@ -153,7 +153,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     "}\n";
 
     volatile boolean isRecording=false;
-    volatile boolean isCapturing=false;
     final static String MIME_TYPE = "audio/mp4a-latm";
     final static int SAMPLE_RATE = 44100;
     final static int BIT_RATE = 128000;
@@ -173,11 +172,11 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     VideoEncoder.VideoEncoderHandler videoEncoderHandler;
     //MainHandler mainHandler;
     volatile boolean isReady=false;
-    boolean VERBOSE=false;
+    boolean VERBOSE=true;
     //Thread audio;
     Thread video;
-    //Keep in landscape by default.
-    boolean portrait=false;
+    //Keep in portrait by default.
+    boolean portrait=true;
     int orientation = -1;
     double screenAspectRatio = -1;
     OrientationEventListener orientationEventListener;
@@ -186,6 +185,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     ImageButton switchButton;
     float rotationAngle = 0.0f;
     boolean backCamera = true;
+    volatile int recordStop = -1;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -279,10 +279,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 }
                 else{
                     isRecording=false;
+                    recordStop = 1;
                     recordButton.setColorFilter(Color.DKGRAY);
-                    //Stop here
-                    videoEncoderHandler.sendEmptyMessage(RECORD_STOP);
-                    Log.d(TAG,"Recorder thread EXITED...");
                     //Reset the RECORD Matrix to be portrait.
                     System.arraycopy(IDENTITY_MATRIX,0,RECORD_IDENTITY_MATRIX,0,IDENTITY_MATRIX.length);
                     //Reset Rotation angle
@@ -330,9 +328,11 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
             recordButton.setColorFilter(Color.RED);
             isRecording = true;
+            recordStop = -1;
         }
         else{
             isRecording = false;
+            recordStop = 1;
         }
         Log.d(TAG,"Returning == "+isRecording);
         return isRecording;
@@ -903,7 +903,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         draw(RECORD_IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
                                 createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
                         if(VERBOSE)Log.d(TAG,"Populated to encoder");
-                        videoEncoderHandler.sendEmptyMessage(SAVE_VIDEO);
+                        continueOrStopRecord();
                         EGLExt.eglPresentationTimeANDROID(mEGLDisplay, encoderSurface, surfaceTexture.getTimestamp());
                         EGL14.eglSwapBuffers(mEGLDisplay, encoderSurface);
                     }
@@ -912,6 +912,21 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     }
                 }
                 frameCount++;
+            }
+        }
+
+        void continueOrStopRecord()
+        {
+            if(VERBOSE)Log.d(TAG,"record stop == "+recordStop);
+            if(recordStop == -1) {
+                videoEncoderHandler.sendEmptyMessage(SAVE_VIDEO);
+            }
+            else{
+                //Stop here
+                if(videoCodec != null){
+                    videoEncoderHandler.sendEmptyMessage(RECORD_STOP);
+                    if(VERBOSE)Log.d(TAG, "Exit recording...");
+                }
             }
         }
 
@@ -1071,19 +1086,19 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 ByteBuffer[] outputBuffers = videoCodec.getOutputBuffers();
                 while (true) {
                     //Extract encoded data
-                    //Log.d(TAG, "Retrieve Encoded Data....");
+                    if(VERBOSE)Log.d(TAG, "Retrieve Encoded Data....");
                     videoBufferInd = videoCodec.dequeueOutputBuffer(bufferInfo, TIMEOUT);
                 /*if((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0){
                     Log.d(TAG,"EOS Reached...");
                     break;
                 }*/
-                    //Log.d(TAG, "OUTPUT buffer index = " + videoBufferInd);
+                    if(VERBOSE)Log.d(TAG, "OUTPUT buffer index = " + videoBufferInd);
                     if (videoBufferInd >= 0) {
                         if (bufferInfo.size != 0) {
                             outputBuffers[videoBufferInd].position(bufferInfo.offset);
                             bufferInfo.presentationTimeUs = System.nanoTime() / 1000;
                             outputBuffers[videoBufferInd].limit(bufferInfo.offset + bufferInfo.size);
-                            //Log.d(TAG, "Writing data size == " + bufferInfo.size);
+                            if(VERBOSE)Log.d(TAG, "Writing data size == " + bufferInfo.size);
                             count += bufferInfo.size;
                             //frames.add(new FrameData(bufferInfo,outputBuffers[videoBufferInd]));
                             mediaMuxerHelper.recordMedia(videoCodec, bufferInfo, false, trackIndex, outputBuffers[videoBufferInd]);
@@ -1101,7 +1116,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         //isVideoAdded = true;
                         mediaMuxerHelper.startMuxer();
                     } else if (videoBufferInd == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                        //Log.d(TAG, "Coming out since no more frame data to read");
+                        if(VERBOSE)Log.d(TAG, "Coming out since no more frame data to read");
                         break;
                     }
                 }
@@ -1128,6 +1143,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 {
                     case RECORD_STOP:
                         enc.drain();
+                        if(VERBOSE)Log.d(TAG,"isRecording == "+isRecording);
                         enc.closeEncoder();
                         break;
                     case SHUTDOWN:
