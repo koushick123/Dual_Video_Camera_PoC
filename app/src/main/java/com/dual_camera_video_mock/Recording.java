@@ -172,7 +172,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     VideoEncoder.VideoEncoderHandler videoEncoderHandler;
     //MainHandler mainHandler;
     volatile boolean isReady=false;
-    boolean VERBOSE=true;
+    boolean VERBOSE=false;
     //Thread audio;
     Thread video;
     //Keep in portrait by default.
@@ -341,9 +341,12 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     @Override
     protected void onDestroy() {
         Log.d(TAG,"onDestroy");
-        SharedPreferences.Editor editor = sharedPreferences.edit();
-        editor.putBoolean("backCamera",true);
-        editor.commit();
+        if(!sharedPreferences.contains("recreate") || !sharedPreferences.getBoolean("recreate",false)) {
+            SharedPreferences.Editor editor = sharedPreferences.edit();
+            editor.putBoolean("backCamera", true);
+            editor.commit();
+            Log.d(TAG,"Resetting to back camera");
+        }
         super.onDestroy();
     }
 
