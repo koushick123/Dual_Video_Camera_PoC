@@ -554,12 +554,18 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             VIDEO_HEIGHT = VIDEO_WIDTH;
             VIDEO_WIDTH = temp;
         }
+        int degree;
         if(backCamera) {
-            mCamera.setDisplayOrientation(info.orientation);
+            degree = 180;
         }
         else{
-            mCamera.setDisplayOrientation(90);
+            degree = 0;
         }
+        Log.d(TAG,"Orientation == "+info.orientation);
+        int result = (info.orientation + degree) % 360;
+        result = (360 - result) % 360;
+        Log.d(TAG,"Result == "+result);
+        mCamera.setDisplayOrientation(result);
     }
 
     public void setCameraDisplayOrientation(Activity activity,
