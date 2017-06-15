@@ -279,7 +279,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 else{
                     isRecord=false;
                     recordButton.setColorFilter(Color.DKGRAY);
-                    cameraHandler.sendEmptyMessage(RECORD_STOP);
+                    cameraHandler.sendMessageDelayed(cameraHandler.obtainMessage(RECORD_STOP),1000);
                     //Reset the RECORD Matrix to be portrait.
                     System.arraycopy(IDENTITY_MATRIX,0,RECORD_IDENTITY_MATRIX,0,IDENTITY_MATRIX.length);
                     //Reset Rotation angle
