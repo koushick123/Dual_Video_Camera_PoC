@@ -49,7 +49,6 @@ import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -91,7 +90,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     private int mTextureId;
     private int muMVPMatrixLoc;
     private static final int SIZEOF_FLOAT = 4;
-    int frameCount=0;
     private int muTexMatrixLoc;
     private int maPositionLoc;
     private int maTextureCoordLoc;
@@ -151,7 +149,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
                     "}\n";
 
-    volatile boolean isRecording=false;
     final static String MIME_TYPE = "audio/mp4a-latm";
     final static int SAMPLE_RATE = 44100;
     final static int BIT_RATE = 128000;
@@ -171,7 +168,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     VideoEncoder.VideoEncoderHandler videoEncoderHandler;
     //MainHandler mainHandler;
     volatile boolean isReady=false;
-    boolean VERBOSE=false;
+    boolean VERBOSE=true;
     //Thread audio;
     Thread video;
     //Keep in portrait by default.
@@ -184,7 +181,10 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     ImageButton switchButton;
     float rotationAngle = 0.0f;
     boolean backCamera = true;
-    volatile int recordStop = -1;
+    volatile boolean isRecord = false;
+    int frameCount=0;
+    volatile int cameraFrameCnt=0;
+    volatile int frameCnt=0;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -266,7 +266,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             @Override
             public void onClick(View view)
             {
-                if(!isRecording){
+                if(!isRecord){
                     determineOrientation();
                     sharedPreferences = getSharedPreferences("dualOrientationMode", Context.MODE_PRIVATE);
                     SharedPreferences.Editor editor = sharedPreferences.edit();
@@ -277,9 +277,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     recreate();
                 }
                 else{
-                    isRecording=false;
-                    recordStop = 1;
+                    isRecord=false;
                     recordButton.setColorFilter(Color.DKGRAY);
+                    cameraHandler.sendEmptyMessage(RECORD_STOP);
                     //Reset the RECORD Matrix to be portrait.
                     System.arraycopy(IDENTITY_MATRIX,0,RECORD_IDENTITY_MATRIX,0,IDENTITY_MATRIX.length);
                     //Reset Rotation angle
@@ -311,7 +311,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
     }
 
-    public boolean checkAndRecord()
+    public void checkAndRecord()
     {
         sharedPreferences = getSharedPreferences("dualOrientationMode", Context.MODE_PRIVATE);
         if(sharedPreferences != null && sharedPreferences.contains("recreate") && sharedPreferences.getBoolean("recreate",false)){
@@ -326,15 +326,11 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 Matrix.rotateM(RECORD_IDENTITY_MATRIX, 0, rotationAngle , 0, 0, 1);
             }
             recordButton.setColorFilter(Color.RED);
-            isRecording = true;
-            recordStop = -1;
+            isRecord = true;
         }
         else{
-            isRecording = false;
-            recordStop = 1;
+            isRecord = false;
         }
-        Log.d(TAG,"Returning == "+isRecording);
-        return isRecording;
     }
 
     @Override
@@ -449,6 +445,11 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         Log.d(TAG,"Start Video encoder after EGL is setup");
         showPreview();
         surfaceTexture.setOnFrameAvailableListener(this);
+        //When recreate() is called, this is called again and recording needs to begin.
+        if(isRecord){
+            Log.d(TAG,"send record start");
+            cameraHandler.sendEmptyMessage(RECORD_START);
+        }
     }
 
     @Override
@@ -465,6 +466,10 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
         if(VERBOSE)Log.d(TAG,"FRAME Available now");
+        if(VERBOSE)Log.d(TAG,"is Record = "+isRecord);
+        if(isRecord){
+            if(VERBOSE)Log.d(TAG,"Frame avail cnt = "+(++cameraFrameCnt));
+        }
         cameraHandler.sendEmptyMessage(FRAME_AVAILABLE);
     }
 
@@ -689,6 +694,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     class CameraRenderer extends Thread
     {
         SurfaceHolder surfaceHolder;
+        int recordStop = -1;
+        boolean isRecording = false;
 
         public CameraRenderer(SurfaceHolder holder)
         {
@@ -884,7 +891,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         draw(RECORD_IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
                                 createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
                         if(VERBOSE)Log.d(TAG,"Populated to encoder");
-                        continueOrStopRecord();
+                        //continueOrStopRecord();
+                        videoEncoderHandler.sendEmptyMessage(SAVE_VIDEO);
                         EGLExt.eglPresentationTimeANDROID(mEGLDisplay, encoderSurface, surfaceTexture.getTimestamp());
                         EGL14.eglSwapBuffers(mEGLDisplay, encoderSurface);
                     }
@@ -936,6 +944,21 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     case FRAME_AVAILABLE:
                         if(VERBOSE)Log.d(TAG,"send to FRAME_AVAILABLE");
                         cameraRenderer.drawFrame();
+                        if(VERBOSE)Log.d(TAG,"Record = "+isRecord);
+                        if(isRecord){
+                            if(VERBOSE)Log.d(TAG,"render frame = "+(++frameCnt));
+                        }
+                        break;
+                    case RECORD_START:
+                        isRecording = true;
+                        //recordStop = -1;
+                        break;
+                    case RECORD_STOP:
+                        isRecording = false;
+                        Log.d(TAG,"stop isRecording == "+isRecording);
+                        videoEncoderHandler.sendEmptyMessage(RECORD_STOP);
+                        if(VERBOSE)Log.d(TAG, "Exit recording...");
+                        Log.d(TAG,"Orig frame = "+frameCount+" , Rendered frame "+frameCnt);
                         break;
                 }
             }
@@ -957,7 +980,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     class VideoEncoder extends Thread
     {
         int count=0;
-        ArrayList<FrameData> frames = new ArrayList<>();
         int trackIndex=0;
 
         @Override
@@ -999,6 +1021,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
         void closeEncoder()
         {
+            drain();
             Log.d(TAG,"STOP and RELEASE");
             videoCodec.signalEndOfInputStream();
             videoCodec.stop();
@@ -1077,7 +1100,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                             outputBuffers[videoBufferInd].limit(bufferInfo.offset + bufferInfo.size);
                             if(VERBOSE)Log.d(TAG, "Writing data size == " + bufferInfo.size);
                             count += bufferInfo.size;
-                            //frames.add(new FrameData(bufferInfo,outputBuffers[videoBufferInd]));
                             mediaMuxerHelper.recordMedia(videoCodec, bufferInfo, false, trackIndex, outputBuffers[videoBufferInd]);
                             videoCodec.releaseOutputBuffer(videoBufferInd, false);
                         }
@@ -1116,8 +1138,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 switch(msg.what)
                 {
                     case RECORD_STOP:
-                        enc.drain();
-                        if(VERBOSE)Log.d(TAG,"isRecording == "+isRecording);
                         enc.closeEncoder();
                         break;
                     case SHUTDOWN:
