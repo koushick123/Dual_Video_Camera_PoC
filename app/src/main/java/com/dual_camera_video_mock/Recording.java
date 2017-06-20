@@ -14,6 +14,7 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
+import android.media.MediaRecorder;
 import android.opengl.EGL14;
 import android.opengl.EGLConfig;
 import android.opengl.EGLContext;
@@ -23,6 +24,7 @@ import android.opengl.EGLSurface;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.Matrix;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -169,7 +171,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     VideoEncoder.VideoEncoderHandler videoEncoderHandler;
     MainHandler mainHandler;
     volatile boolean isReady=false;
-    boolean VERBOSE=true;
+    boolean VERBOSE=false;
     //Thread audio;
     Thread video;
     //Keep in portrait by default.
@@ -186,6 +188,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     int frameCount=0;
     volatile int cameraFrameCnt=0;
     volatile int frameCnt=0;
+    MediaRecorder mediaRecorder = null;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -280,7 +283,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 else{
                     isRecord=false;
                     recordButton.setColorFilter(Color.DKGRAY);
-                    cameraHandler.sendMessageDelayed(cameraHandler.obtainMessage(RECORD_STOP),1200);
+                    //cameraHandler.sendMessageDelayed(cameraHandler.obtainMessage(RECORD_STOP),1200);
+                    cameraHandler.sendEmptyMessage(RECORD_STOP);
                     //Reset the RECORD Matrix to be portrait.
                     System.arraycopy(IDENTITY_MATRIX,0,RECORD_IDENTITY_MATRIX,0,IDENTITY_MATRIX.length);
                     //Reset Rotation angle
@@ -444,12 +448,14 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         CameraRenderer cameraRenderer = new CameraRenderer(surfaceHolder);
         cameraRenderer.start();
         waitUntilReady();
-        VideoEncoder videoEncoder = new VideoEncoder();
-        isReady=false;
-        videoEncoder.start();
-        waitUntilReady();
-        videoEncoderHandler = videoEncoder.getHandler();
-        Log.d(TAG,"Start Video encoder after EGL is setup");
+        if(!checkForLollipopAndAbove()) {
+            VideoEncoder videoEncoder = new VideoEncoder();
+            isReady = false;
+            videoEncoder.start();
+            waitUntilReady();
+            videoEncoderHandler = videoEncoder.getHandler();
+            Log.d(TAG, "Start Video encoder after EGL is setup");
+        }
         showPreview();
         surfaceTexture.setOnFrameAvailableListener(this);
         //When recreate() is called, this is called again and recording needs to begin.
@@ -478,6 +484,16 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             if(VERBOSE)Log.d(TAG,"Frame avail cnt = "+(++cameraFrameCnt));
         }
         cameraHandler.sendEmptyMessage(FRAME_AVAILABLE);
+    }
+
+    private boolean checkForLollipopAndAbove()
+    {
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            return true;
+        }
+        else{
+            return false;
+        }
     }
 
     private void setupCamera()
@@ -756,23 +772,25 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             return texId;
         }
 
-        private void prepareWindowSurface(Surface surface)
+        private EGLSurface prepareWindowSurface(Surface surface)
         {
             // Create a window surface, and attach it to the Surface we received.
             int[] surfaceAttribs = {
                     EGL14.EGL_NONE
             };
-            eglSurface = EGL14.eglCreateWindowSurface(mEGLDisplay, mEGLConfig,surface ,
+            EGLSurface surface1;
+            surface1 = EGL14.eglCreateWindowSurface(mEGLDisplay, mEGLConfig,surface ,
                     surfaceAttribs, 0);
             checkEglError("eglCreateWindowSurface");
-            if (eglSurface == null) {
+            if (surface1 == null) {
                 throw new RuntimeException("surface was null");
             }
+            return surface1;
         }
 
         void createSurfaceTexture()
         {
-            prepareWindowSurface(surfaceHolder.getSurface());
+            eglSurface = prepareWindowSurface(surfaceHolder.getSurface());
             makeCurrent(eglSurface);
 
             mProgramHandle = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER_EXT);
@@ -867,6 +885,50 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             return fb;
         }
 
+        private boolean checkForLollipopAndAbove()
+        {
+            if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                return true;
+            }
+            else{
+                return false;
+            }
+        }
+
+        String mNextVideoAbsolutePath = null;
+        void setupMediaRecorder()
+        {
+            camcorderProfile = CamcorderProfile.get(cameraId,CamcorderProfile.QUALITY_HIGH);
+            mediaRecorder = new MediaRecorder();
+            mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            if (mNextVideoAbsolutePath == null || mNextVideoAbsolutePath.isEmpty()) {
+                mNextVideoAbsolutePath = getVideoFilePath(getApplicationContext());
+            }
+            mediaRecorder.setOutputFile(mNextVideoAbsolutePath);
+            mediaRecorder.setVideoEncodingBitRate(camcorderProfile.videoBitRate);
+            mediaRecorder.setVideoFrameRate(camcorderProfile.videoFrameRate);
+            mediaRecorder.setVideoSize(VIDEO_WIDTH, VIDEO_HEIGHT);
+            mediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            try {
+                mediaRecorder.prepare();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                encoderSurface = prepareWindowSurface(mediaRecorder.getSurface());
+            }
+        }
+
+        private String getVideoFilePath(Context context) {
+            String path = context.getExternalFilesDir(null).getAbsolutePath() + "/"
+                    + System.currentTimeMillis() + ".mp4";
+            Log.d(TAG,"Saving media file at = "+path);
+            return path;
+        }
+
         void drawFrame()
         {
             if(mEGLConfig!=null && mCamera!= null) {
@@ -891,25 +953,27 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 //Calls eglSwapBuffers.  Use this to "publish" the current frame.
                 EGL14.eglSwapBuffers(mEGLDisplay, eglSurface);
 
-                if(isRecording){
-                    if(videoEncoderHandler!=null) {
-                        makeCurrent(encoderSurface);
-                        if(VERBOSE)Log.d(TAG,"Made encoder surface current");
-                        GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
-                        draw(RECORD_IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
-                                createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
-                        if(VERBOSE)Log.d(TAG,"Populated to encoder");
-                        videoEncoderHandler.sendEmptyMessage(SAVE_VIDEO);
-                        EGLExt.eglPresentationTimeANDROID(mEGLDisplay, encoderSurface, surfaceTexture.getTimestamp());
-                        EGL14.eglSwapBuffers(mEGLDisplay, encoderSurface);
+                if(isRecording) {
+                    makeCurrent(encoderSurface);
+                    if (VERBOSE) Log.d(TAG, "Made encoder surface current");
+                    GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+                    draw(RECORD_IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
+                            createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
+                    if (VERBOSE) Log.d(TAG, "Populated to encoder");
+                    if (checkForLollipopAndAbove() && recordStop == -1) {
+                        mediaRecorder.start();
+                        recordStop = 1;
+                        videoEncoderHandler = null;
                     }
-                    else{
-                        Log.d(TAG,"Encoder not Ready yet...... Something wrong!!");
+                    else if(videoEncoderHandler!=null) {
+                        videoEncoderHandler.sendEmptyMessage(SAVE_VIDEO);
+                    }
+                    EGLExt.eglPresentationTimeANDROID(mEGLDisplay, encoderSurface, surfaceTexture.getTimestamp());
+                    EGL14.eglSwapBuffers(mEGLDisplay, encoderSurface);
                     }
                 }
                 frameCount++;
             }
-        }
 
         void shutdown()
         {
@@ -943,12 +1007,22 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         break;
                     case RECORD_START:
                         isRecording = true;
-                        //recordStop = -1;
+                        if(checkForLollipopAndAbove()){
+                            setupMediaRecorder();
+                        }
                         break;
                     case RECORD_STOP:
                         isRecording = false;
+                        if(checkForLollipopAndAbove()) {
+                            recordStop = -1;
+                            mediaRecorder.stop();
+                            mediaRecorder.release();
+                            mediaRecorder = null;
+                        }
+                        else{
+                            videoEncoderHandler.sendEmptyMessage(RECORD_STOP);
+                        }
                         Log.d(TAG,"stop isRecording == "+isRecording);
-                        videoEncoderHandler.sendEmptyMessage(RECORD_STOP);
                         if(VERBOSE)Log.d(TAG, "Exit recording...");
                         Log.d(TAG,"Orig frame = "+frameCount+" , Rendered frame "+frameCnt);
                         break;
