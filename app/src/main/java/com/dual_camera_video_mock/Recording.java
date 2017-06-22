@@ -179,7 +179,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     MediaMuxer mediaMuxer;
     //RecordVideo.VideoRecordHandler recordHandler=null;
     Object renderObj = new Object();
-    //CameraRenderer.CameraHandler cameraHandler;
+    CameraRenderer.CameraHandler cameraHandler;
     VideoEncoder.VideoEncoderHandler videoEncoderHandler;
     MainHandler mainHandler;
     volatile boolean isReady=false;
@@ -303,11 +303,11 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     recreate();
                 }
                 else{
-                    isRecording=false;
-                    recordStop = -1;
+                    /*isRecording=false;
+                    recordStop = -1;*/
                     recordButton.setColorFilter(Color.DKGRAY);
                     //cameraHandler.sendMessageDelayed(cameraHandler.obtainMessage(RECORD_STOP),1200);
-                    //cameraHandler.sendEmptyMessage(RECORD_STOP);
+                    cameraHandler.sendEmptyMessage(RECORD_STOP);
                     //Reset the RECORD Matrix to be portrait.
                     System.arraycopy(IDENTITY_MATRIX,0,RECORD_IDENTITY_MATRIX,0,IDENTITY_MATRIX.length);
                     //Reset Rotation angle
@@ -356,10 +356,10 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 Matrix.rotateM(RECORD_IDENTITY_MATRIX, 0, rotationAngle , 0, 0, 1);
             }
             recordButton.setColorFilter(Color.RED);
-            isRecording = true;
+            isRecord = true;
         }
         else{
-            isRecording = false;
+            isRecord = false;
         }
     }
 
@@ -422,7 +422,6 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             mCamera.stopPreview();
             mCamera.release();
             mCamera = null;
-            stopBackgroundThread();
             Log.d(TAG, "releaseCamera -- done");
         }
     }
@@ -475,13 +474,13 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         Log.d(TAG, "surfCreated holder = " + surfHlder);
         mainHandler = new MainHandler(this);
         prepareEGLDisplayandContext();
-        surfaceHolder=surfHlder;
-        createSurfaceTexture();
-        createCameraPreview();
-        /*CameraRenderer cameraRenderer = new CameraRenderer(surfaceHolder);
+        //surfaceHolder=surfHlder;
+        //createSurfaceTexture();
+        //createCameraPreview();
+        CameraRenderer cameraRenderer = new CameraRenderer(surfHlder);
         cameraRenderer.start();
         waitUntilReady();
-        if(!checkForLollipopAndAbove()) {
+        /*if(!checkForLollipopAndAbove()) {
             VideoEncoder videoEncoder = new VideoEncoder();
             isReady = false;
             videoEncoder.start();
@@ -490,16 +489,16 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             Log.d(TAG, "Start Video encoder after EGL is setup");
         }*/
         //showPreview();
-        //createCameraPreview();
+        createCameraPreview();
         surfaceTexture.setOnFrameAvailableListener(this);
-        if(isRecording){
+        /*if(isRecording){
             setupMediaRecorder();
-        }
+        }*/
         //When recreate() is called, this is called again and recording needs to begin.
-        /*if(isRecord){
+        if(isRecord){
             Log.d(TAG,"send record start");
             cameraHandler.sendEmptyMessage(RECORD_START);
-        }*/
+        }
     }
 
     @Override
@@ -517,8 +516,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
         Log.d(TAG,"FRAME Available now");
         if(VERBOSE)Log.d(TAG,"is Record = "+isRecord);
-        drawFrame();
-        //cameraHandler.sendEmptyMessage(FRAME_AVAILABLE);
+        //drawFrame();
+        cameraHandler.sendEmptyMessage(FRAME_AVAILABLE);
     }
 
     protected void startBackgroundThread() {
@@ -544,12 +543,13 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             Log.e(TAG, "onOpened == " + cameraOrientation+", "+surfaceTexture);
             cameraDevice = camera;
             if (surfaceTexture != null){
+                createCameraPreview();
                 if (!isRecording) {
-                    createCameraPreview();
+
                 } else {
                     //startRecordingVideo();
-                    isRecording = true;
-                    recordStop = -1;
+                    //isRecording = true;
+                    //recordStop = -1;
                 }
             }
         }
@@ -568,7 +568,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     private void startRecordingVideo() {
         closePreviewSessions();
         try {
-            setupMediaRecorder();
+            //setupMediaRecorder();
             /*SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
             assert surfaceTexture!=null;*/
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
@@ -583,7 +583,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             }
 
             Surface recorderSurface = mediaRecorder.getSurface();
-            prepareWindowSurface(recorderSurface);
+            //prepareWindowSurface(recorderSurface);
             surfaces.add(recorderSurface);
             captureRequestBuilder.addTarget(recorderSurface);
             cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
@@ -591,7 +591,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 public void onConfigured(CameraCaptureSession cameraCaptureSession) {
                     cameraCaptureSessions = cameraCaptureSession;
                     updatePreview();
-                    runOnUiThread(new Runnable() {
+                    /*runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             // UI
@@ -602,7 +602,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                                 mediaRecorder.start();
                             }
                         }
-                    });
+                    });*/
                 }
 
                 @Override
@@ -687,7 +687,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
     protected void createCameraPreview() {
         try {
-            //closePreviewSessions();
+            closePreviewSessions();
             //SurfaceTexture texture = textureView.getSurfaceTexture();
             //assert texture != null;
             //Log.d(TAG,"Preview sessions closed");
@@ -980,13 +980,13 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         return configs[0];
     }
 
-    /*class CameraRenderer extends Thread
-    {*/
+    class CameraRenderer extends Thread
+    {
         SurfaceHolder surfaceHolder;
         int recordStop = -1;
         //boolean isRecording = false;
 
-        /*public CameraRenderer(SurfaceHolder holder)
+        public CameraRenderer(SurfaceHolder holder)
         {
             surfaceHolder=holder;
         }
@@ -1004,7 +1004,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             if(VERBOSE)Log.d(TAG,"Main thread notified");
             Looper.loop();
             Log.d(TAG,"Camera Renderer STOPPED");
-        }*/
+        }
 
         private void makeCurrent(EGLSurface surface)
         {
@@ -1208,6 +1208,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 EGL14.eglSwapBuffers(mEGLDisplay, eglSurface);
 
                 if(isRecording) {
+                    Log.d(TAG,"encoderSurface = "+encoderSurface);
                     makeCurrent(encoderSurface);
                     if (VERBOSE) Log.d(TAG, "Made encoder surface current");
                     GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
@@ -1230,7 +1231,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             Looper.myLooper().quit();
         }
 
-        /*class CameraHandler extends Handler
+        class CameraHandler extends Handler
         {
             WeakReference<CameraRenderer> cameraRender;
 
@@ -1256,30 +1257,31 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         }
                         break;
                     case RECORD_START:
+                        setupMediaRecorder();
                         isRecording = true;
-                        if(checkForLollipopAndAbove()){
-                            setupMediaRecorder();
-                        }
+                        //if(checkForLollipopAndAbove()){
+
+                        //}
                         break;
                     case RECORD_STOP:
                         isRecording = false;
-                        if(checkForLollipopAndAbove()) {
+                        //if(checkForLollipopAndAbove()) {
                             recordStop = -1;
                             mediaRecorder.stop();
                             mediaRecorder.release();
                             mediaRecorder = null;
-                        }
+                        /*}
                         else{
                             videoEncoderHandler.sendEmptyMessage(RECORD_STOP);
-                        }
+                        }*/
                         Log.d(TAG,"stop isRecording == "+isRecording);
                         if(VERBOSE)Log.d(TAG, "Exit recording...");
                         Log.d(TAG,"Orig frame = "+frameCount+" , Rendered frame "+frameCnt);
                         break;
                 }
             }
-        }*/
-    //}
+        }
+    }
 
     private void prepareMuxer()
     {
