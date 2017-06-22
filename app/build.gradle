@@ -6,7 +6,7 @@ android {
 
     defaultConfig {
         applicationId "com.dual_camera_video_mock"
-        minSdkVersion 18
+        minSdkVersion 21
         targetSdkVersion 25
         versionCode 1
         versionName "1.0"

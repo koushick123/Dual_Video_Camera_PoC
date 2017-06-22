@@ -8,6 +8,15 @@ import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.hardware.SensorManager;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraDevice;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CameraMetadata;
+import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.CamcorderProfile;
 import android.media.MediaCodec;
@@ -24,9 +33,9 @@ import android.opengl.EGLSurface;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.Matrix;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
 import android.support.annotation.NonNull;
@@ -35,6 +44,7 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.Size;
 import android.view.OrientationEventListener;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -51,6 +61,8 @@ import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
@@ -80,7 +92,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     final int SAVE_VIDEO = 4000;
     final int SHUTDOWN = 6000;
     final int RECORD_COMPLETE = 7000;
-    SurfaceTexture surfaceTexture;
+    SurfaceTexture surfaceTexture = null;
     private Camera mCamera;
     private EGLDisplay mEGLDisplay = EGL14.EGL_NO_DISPLAY;
     private EGLContext mEGLContext = EGL14.EGL_NO_CONTEXT;
@@ -157,7 +169,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     final static int BIT_RATE = 128000;
     public static final int SAMPLES_PER_FRAME = 1024;	// AAC, bytes/frame/channel
     public static final int FRAMES_PER_BUFFER = 25; 	// AAC, frame/buffer/sec
-    //MediaFormat audioFormat=null;
+    MediaFormat audioFormat=null;
     MediaFormat videoFormat=null;
     int TIMEOUT = 0;
     static final String AUDIO_PERMISSION = "android.permission.RECORD_AUDIO";
@@ -167,12 +179,12 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     MediaMuxer mediaMuxer;
     //RecordVideo.VideoRecordHandler recordHandler=null;
     Object renderObj = new Object();
-    CameraRenderer.CameraHandler cameraHandler;
+    //CameraRenderer.CameraHandler cameraHandler;
     VideoEncoder.VideoEncoderHandler videoEncoderHandler;
     MainHandler mainHandler;
     volatile boolean isReady=false;
     boolean VERBOSE=false;
-    //Thread audio;
+    Thread audio;
     Thread video;
     //Keep in portrait by default.
     boolean portrait=true;
@@ -189,6 +201,16 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     volatile int cameraFrameCnt=0;
     volatile int frameCnt=0;
     MediaRecorder mediaRecorder = null;
+    CameraCharacteristics cameraCharacteristics;
+    private int cameraOrientation;
+    private Size imageDimension;
+    protected CameraDevice cameraDevice;
+    protected CameraCaptureSession cameraCaptureSessions;
+    protected CaptureRequest captureRequest;
+    protected CaptureRequest.Builder captureRequestBuilder;
+    private Handler mBackgroundHandler;
+    private HandlerThread mBackgroundThread;
+    boolean isRecording = false;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -281,10 +303,11 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     recreate();
                 }
                 else{
-                    isRecord=false;
+                    isRecording=false;
+                    recordStop = -1;
                     recordButton.setColorFilter(Color.DKGRAY);
                     //cameraHandler.sendMessageDelayed(cameraHandler.obtainMessage(RECORD_STOP),1200);
-                    cameraHandler.sendEmptyMessage(RECORD_STOP);
+                    //cameraHandler.sendEmptyMessage(RECORD_STOP);
                     //Reset the RECORD Matrix to be portrait.
                     System.arraycopy(IDENTITY_MATRIX,0,RECORD_IDENTITY_MATRIX,0,IDENTITY_MATRIX.length);
                     //Reset Rotation angle
@@ -306,14 +329,16 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 SharedPreferences.Editor editor = sharedPreferences.edit();
                 editor.putBoolean("backCamera",backCamera);
                 editor.commit();
-                releaseCamera();
-                setupCamera();
-                showPreview();
+                //releaseCamera();
+                setupCamera2();
+                //showPreview();
+                //createCameraPreview();
             }
         });
         checkAndRecord();
         getSupportActionBar().hide();
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        Log.d(TAG,"surfaceTexture created");
     }
 
     public void checkAndRecord()
@@ -331,10 +356,10 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 Matrix.rotateM(RECORD_IDENTITY_MATRIX, 0, rotationAngle , 0, 0, 1);
             }
             recordButton.setColorFilter(Color.RED);
-            isRecord = true;
+            isRecording = true;
         }
         else{
-            isRecord = false;
+            isRecording = false;
         }
     }
 
@@ -357,22 +382,24 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
     @Override
     protected void onPause() {
-        if(videoEncoderHandler!=null) {
+        /*if(videoEncoderHandler!=null) {
             videoEncoderHandler.sendEmptyMessage(SHUTDOWN);
         }
         Log.d(TAG,"cameraHandler = "+cameraHandler);
         if(cameraHandler!=null) {
             cameraHandler.sendEmptyMessage(SHUTDOWN);
-        }
+        }*/
+        closeCamera();
+        //stopBackgroundThread();
         if(surfaceTexture!=null){
             surfaceTexture.release();
         }
-        releaseCamera();
+        //releaseCamera();
         orientationEventListener.disable();
-        if(videoCodec!=null) {
+        /*if(videoCodec!=null) {
             videoCodec.release();
             videoCodec = null;
-        }
+        }*/
         releaseEGLSurface();
         releaseProgram();
         releaseEGLContext();
@@ -385,7 +412,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         Log.d(TAG,"Setting up camera");
         orientationEventListener.enable();
         //checkForPermissions();
-        setupCamera();
+        //startBackgroundThread();
+        //setupCamera();
+        setupCamera2();
     }
 
     private void releaseCamera() {
@@ -393,6 +422,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             mCamera.stopPreview();
             mCamera.release();
             mCamera = null;
+            stopBackgroundThread();
             Log.d(TAG, "releaseCamera -- done");
         }
     }
@@ -441,11 +471,14 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     }
 
     @Override
-    public void surfaceCreated(SurfaceHolder surfaceHolder) {
-        Log.d(TAG, "surfCreated holder = " + surfaceHolder);
+    public void surfaceCreated(SurfaceHolder surfHlder) {
+        Log.d(TAG, "surfCreated holder = " + surfHlder);
         mainHandler = new MainHandler(this);
         prepareEGLDisplayandContext();
-        CameraRenderer cameraRenderer = new CameraRenderer(surfaceHolder);
+        surfaceHolder=surfHlder;
+        createSurfaceTexture();
+        createCameraPreview();
+        /*CameraRenderer cameraRenderer = new CameraRenderer(surfaceHolder);
         cameraRenderer.start();
         waitUntilReady();
         if(!checkForLollipopAndAbove()) {
@@ -455,14 +488,18 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             waitUntilReady();
             videoEncoderHandler = videoEncoder.getHandler();
             Log.d(TAG, "Start Video encoder after EGL is setup");
-        }
-        showPreview();
+        }*/
+        //showPreview();
+        //createCameraPreview();
         surfaceTexture.setOnFrameAvailableListener(this);
+        if(isRecording){
+            setupMediaRecorder();
+        }
         //When recreate() is called, this is called again and recording needs to begin.
-        if(isRecord){
+        /*if(isRecord){
             Log.d(TAG,"send record start");
             cameraHandler.sendEmptyMessage(RECORD_START);
-        }
+        }*/
     }
 
     @Override
@@ -478,22 +515,232 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        if(VERBOSE)Log.d(TAG,"FRAME Available now");
+        Log.d(TAG,"FRAME Available now");
         if(VERBOSE)Log.d(TAG,"is Record = "+isRecord);
-        if(isRecord){
-            if(VERBOSE)Log.d(TAG,"Frame avail cnt = "+(++cameraFrameCnt));
-        }
-        cameraHandler.sendEmptyMessage(FRAME_AVAILABLE);
+        drawFrame();
+        //cameraHandler.sendEmptyMessage(FRAME_AVAILABLE);
     }
 
-    private boolean checkForLollipopAndAbove()
+    protected void startBackgroundThread() {
+        mBackgroundThread = new HandlerThread("Camera Background");
+        mBackgroundThread.start();
+        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
+    }
+    protected void stopBackgroundThread() {
+        mBackgroundThread.quitSafely();
+        try {
+            mBackgroundThread.join();
+            mBackgroundThread = null;
+            mBackgroundHandler = null;
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private final CameraDevice.StateCallback stateCallback = new CameraDevice.StateCallback() {
+        @Override
+        public void onOpened(CameraDevice camera) {
+            //This is called when the camera is open
+            Log.e(TAG, "onOpened == " + cameraOrientation+", "+surfaceTexture);
+            cameraDevice = camera;
+            if (surfaceTexture != null){
+                if (!isRecording) {
+                    createCameraPreview();
+                } else {
+                    //startRecordingVideo();
+                    isRecording = true;
+                    recordStop = -1;
+                }
+            }
+        }
+        @Override
+        public void onDisconnected(CameraDevice camera) {
+            cameraDevice.close();
+        }
+        @Override
+        public void onError(CameraDevice camera, int error) {
+            Log.d(TAG,"Error encountered");
+            cameraDevice.close();
+            cameraDevice = null;
+        }
+    };
+
+    private void startRecordingVideo() {
+        closePreviewSessions();
+        try {
+            setupMediaRecorder();
+            /*SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
+            assert surfaceTexture!=null;*/
+            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+            List<Surface> surfaces = new ArrayList<>();
+
+            Surface previewSurface = new Surface(surfaceTexture);
+            surfaces.add(previewSurface);
+            captureRequestBuilder.addTarget(previewSurface);
+
+            if(!isRecording) {
+                mediaRecorder.prepare();
+            }
+
+            Surface recorderSurface = mediaRecorder.getSurface();
+            prepareWindowSurface(recorderSurface);
+            surfaces.add(recorderSurface);
+            captureRequestBuilder.addTarget(recorderSurface);
+            cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
+                @Override
+                public void onConfigured(CameraCaptureSession cameraCaptureSession) {
+                    cameraCaptureSessions = cameraCaptureSession;
+                    updatePreview();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            // UI
+                            //takeVideoBtn.setText(R.string.stop_video);
+                            // Start recording
+                            if(!isRecording) {
+                                isRecording = true;
+                                mediaRecorder.start();
+                            }
+                        }
+                    });
+                }
+
+                @Override
+                public void onConfigureFailed(CameraCaptureSession cameraCaptureSession) {
+                    Toast.makeText(getApplicationContext(), "Failed", Toast.LENGTH_SHORT).show();
+                }
+            }, mBackgroundHandler);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    private void setupCamera2()
     {
-        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            return true;
+        CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        closeCamera();
+        if(sharedPreferences.contains("backCamera")){
+            backCamera = sharedPreferences.getBoolean("backCamera",true);
         }
         else{
-            return false;
+            backCamera = true;
         }
+        try {
+            for (String camId : manager.getCameraIdList()) {
+                cameraCharacteristics = manager.getCameraCharacteristics(camId);
+                cameraOrientation = cameraCharacteristics.get(CameraCharacteristics.LENS_FACING);
+                if(backCamera) {
+                    if (cameraOrientation == CameraCharacteristics.LENS_FACING_BACK) {
+                        cameraId = Integer.parseInt(camId);
+                        break;
+                    }
+                }
+                else{
+                    if (cameraOrientation == CameraCharacteristics.LENS_FACING_FRONT) {
+                        cameraId = Integer.parseInt(camId);
+                        break;
+                    }
+                }
+            }
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+                    && ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(Recording.this, new String[]{Manifest.permission.CAMERA,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE}, MY_PERMISSIONS_REQUEST_CAMERA);
+                return;
+            }
+            CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId+"");
+            int level=characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
+            switch(level)
+            {
+                case CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL:
+                    Log.d(TAG,"Full support");
+                    break;
+                case CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY:
+                    Log.d(TAG,"Legacy support");
+                    break;
+                case CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED:
+                    Log.d(TAG,"Limited support");
+                    break;
+            }
+            StreamConfigurationMap configs = characteristics.get(
+                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            imageDimension = configs.getOutputSizes(SurfaceTexture.class)[0];
+            Log.d(TAG,"callback = "+stateCallback+", cam id = "+cameraId);
+            manager.openCamera(cameraId+"",stateCallback,null);
+            //setCameraLayout();
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void closeCamera() {
+        closePreviewSessions();
+
+        if (null != cameraDevice) {
+            cameraDevice.close();
+            cameraDevice = null;
+        }
+    }
+
+    protected void createCameraPreview() {
+        try {
+            //closePreviewSessions();
+            //SurfaceTexture texture = textureView.getSurfaceTexture();
+            //assert texture != null;
+            //Log.d(TAG,"Preview sessions closed");
+            surfaceTexture.setDefaultBufferSize(imageDimension.getWidth(), imageDimension.getHeight());
+            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            Surface videoSurface = new Surface(surfaceTexture);
+            captureRequestBuilder.addTarget(videoSurface);
+
+            Log.d(TAG,"beginning capture session");
+            cameraDevice.createCaptureSession(Arrays.asList(videoSurface), new CameraCaptureSession.StateCallback(){
+                @Override
+                public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
+                    //The camera is already closed
+                    if (null == cameraDevice) {
+                        return;
+                    }
+                    // When the session is ready, we start displaying the preview.
+                    cameraCaptureSessions = cameraCaptureSession;
+                    Log.d(TAG,"Camera capture session == "+cameraCaptureSession);
+                    updatePreview();
+                }
+                @Override
+                public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
+                    //Toast.makeText(TAG, "Configuration change", Toast.LENGTH_SHORT).show();
+                }
+                }, null);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    protected void updatePreview() {
+        if(null == cameraDevice) {
+            Log.e(TAG, "updatePreview error, return");
+        }
+        captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+        try {
+            /*HandlerThread thread = new HandlerThread("CameraPreview");
+            thread.start();*/
+            Log.d(TAG,"Camera session "+cameraCaptureSessions);
+            cameraCaptureSessions.setRepeatingRequest(captureRequestBuilder.build(), null, null);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void closePreviewSessions()
+    {
+        if(cameraCaptureSessions!=null) {
+            cameraCaptureSessions.close();
+        }
+        cameraCaptureSessions=null;
+        Log.d(TAG,"CLOSE Camera capture session == "+cameraCaptureSessions);
     }
 
     private void setupCamera()
@@ -592,6 +839,24 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         result = (360 - result) % 360;
         Log.d(TAG,"Result == "+result);
         mCamera.setDisplayOrientation(result);
+    }
+
+    void setCameraLayout()
+    {
+        // Set the preview aspect ratio.
+        ViewGroup.LayoutParams layoutParams = cameraView.getLayoutParams();
+        int temp = VIDEO_HEIGHT;
+        VIDEO_HEIGHT = VIDEO_WIDTH;
+        VIDEO_WIDTH = temp;
+        layoutParams.height = VIDEO_HEIGHT;
+        layoutParams.width = VIDEO_WIDTH;
+        Log.d(TAG,"LP Height = "+layoutParams.height);
+        Log.d(TAG,"LP Width = "+layoutParams.width);
+        if(!portrait) {
+            temp = VIDEO_HEIGHT;
+            VIDEO_HEIGHT = VIDEO_WIDTH;
+            VIDEO_WIDTH = temp;
+        }
     }
 
     private void showPreview()
@@ -715,13 +980,13 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         return configs[0];
     }
 
-    class CameraRenderer extends Thread
-    {
+    /*class CameraRenderer extends Thread
+    {*/
         SurfaceHolder surfaceHolder;
         int recordStop = -1;
-        boolean isRecording = false;
+        //boolean isRecording = false;
 
-        public CameraRenderer(SurfaceHolder holder)
+        /*public CameraRenderer(SurfaceHolder holder)
         {
             surfaceHolder=holder;
         }
@@ -739,7 +1004,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             if(VERBOSE)Log.d(TAG,"Main thread notified");
             Looper.loop();
             Log.d(TAG,"Camera Renderer STOPPED");
-        }
+        }*/
 
         private void makeCurrent(EGLSurface surface)
         {
@@ -885,18 +1150,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             return fb;
         }
 
-        private boolean checkForLollipopAndAbove()
-        {
-            if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                return true;
-            }
-            else{
-                return false;
-            }
-        }
-
         String mNextVideoAbsolutePath = null;
-        void setupMediaRecorder()
+        public void setupMediaRecorder()
         {
             camcorderProfile = CamcorderProfile.get(cameraId,CamcorderProfile.QUALITY_HIGH);
             mediaRecorder = new MediaRecorder();
@@ -917,9 +1172,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                encoderSurface = prepareWindowSurface(mediaRecorder.getSurface());
-            }
+            encoderSurface = prepareWindowSurface(mediaRecorder.getSurface());
         }
 
         private String getVideoFilePath(Context context) {
@@ -931,9 +1184,10 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
         void drawFrame()
         {
-            if(mEGLConfig!=null && mCamera!= null) {
+            Log.d(TAG,"mEGLConfig = "+mEGLConfig+", cameraDevice ="+cameraDevice);
+            if(mEGLConfig!=null && cameraDevice!= null) {
                 makeCurrent(eglSurface);
-                if(VERBOSE) Log.d(TAG,"made current");
+                Log.d(TAG,"made current");
                 //Get next frame from camera
                 surfaceTexture.updateTexImage();
                 surfaceTexture.getTransformMatrix(mTmpMatrix);
@@ -960,13 +1214,9 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     draw(RECORD_IDENTITY_MATRIX, createFloatBuffer(FULL_RECTANGLE_COORDS), 0, (FULL_RECTANGLE_COORDS.length / 2), 2, 2 * SIZEOF_FLOAT, mTmpMatrix,
                             createFloatBuffer(FULL_RECTANGLE_TEX_COORDS), mTextureId, 2 * SIZEOF_FLOAT);
                     if (VERBOSE) Log.d(TAG, "Populated to encoder");
-                    if (checkForLollipopAndAbove() && recordStop == -1) {
+                    if (recordStop == -1) {
                         mediaRecorder.start();
                         recordStop = 1;
-                        videoEncoderHandler = null;
-                    }
-                    else if(videoEncoderHandler!=null) {
-                        videoEncoderHandler.sendEmptyMessage(SAVE_VIDEO);
                     }
                     EGLExt.eglPresentationTimeANDROID(mEGLDisplay, encoderSurface, surfaceTexture.getTimestamp());
                     EGL14.eglSwapBuffers(mEGLDisplay, encoderSurface);
@@ -980,7 +1230,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             Looper.myLooper().quit();
         }
 
-        class CameraHandler extends Handler
+        /*class CameraHandler extends Handler
         {
             WeakReference<CameraRenderer> cameraRender;
 
@@ -1028,8 +1278,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         break;
                 }
             }
-        }
-    }
+        }*/
+    //}
 
     private void prepareMuxer()
     {
@@ -1213,6 +1463,184 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     case SAVE_VIDEO:
                         enc.drain();
                         break;
+                }
+            }
+        }
+    }
+
+    class AudioEncoder extends Thread
+    {
+
+        private void setupAudioRecorder()
+        {
+            try {
+                audioFormat = MediaFormat.createAudioFormat(AudioVideoRecording.MIME_TYPE, AudioVideoRecording.SAMPLE_RATE, 1);
+                audioFormat.setInteger(MediaFormat.KEY_BIT_RATE,AudioVideoRecording.BIT_RATE);
+                audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
+                audioFormat.setInteger(MediaFormat.KEY_CHANNEL_MASK, AudioFormat.CHANNEL_IN_MONO);
+                audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+                audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
+                mediaCodec = MediaCodec.createEncoderByType(AudioVideoRecording.MIME_TYPE);
+                mediaCodec.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+                mediaCodec.start();
+
+                int min_buffer_size = AudioRecord.getMinBufferSize(
+                        SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT);
+                Log.d(TAG,"MIN Buffer size == "+min_buffer_size);
+                int buffer_size = SAMPLES_PER_FRAME * FRAMES_PER_BUFFER;
+                if (buffer_size < min_buffer_size)
+                    buffer_size = ((min_buffer_size / SAMPLES_PER_FRAME) + 1) * SAMPLES_PER_FRAME * 2;
+                Log.d(TAG,"Buffer size == "+buffer_size);
+                audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT, buffer_size);
+
+                Log.d(TAG,"Audio record state == "+audioRecord.getState());
+                if(audioRecord.getState() == 0)
+                {
+                    final int[] AUDIO_SOURCES = new int[] {
+                            MediaRecorder.AudioSource.DEFAULT,
+                            MediaRecorder.AudioSource.CAMCORDER,
+                            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    };
+                    for(int audioSource : AUDIO_SOURCES)
+                    {
+                        audioRecord = new AudioRecord(audioSource,SAMPLE_RATE ,
+                                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buffer_size);
+                        if(audioRecord.getState() == 1)
+                        {
+                            Log.d(TAG,"audioSource == "+audioSource);
+                            break;
+                        }
+                        audioRecord=null;
+                    }
+                }
+                if(audioRecord == null || audioRecord.getState() == 0){
+                    Toast.makeText(getApplicationContext(),"Audio record not supported in this device.",Toast.LENGTH_SHORT).show();
+                    mediaCodec.stop();
+                    mediaCodec.release();
+                    return;
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        @Override
+        public void run() {
+            int len = 0, bufferIndex = 0;
+            audioRecord.startRecording();
+            final ByteBuffer[] inputBuffers = mediaCodec.getInputBuffers();
+            Log.d(TAG,"Input buffer length == "+inputBuffers.length);
+            ByteBuffer buf;
+            boolean isEOS;
+            int trackIndex = 0;
+            int audioBufferInd;
+            boolean isRecording = false;
+            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+            long count=0;
+            try {
+
+                MAIN_LOOP:                while (true) {
+                    bufferIndex = mediaCodec.dequeueInputBuffer(TIMEOUT);
+                    isEOS=false;
+                    //Log.d(TAG,"INPUT buffer Index == "+bufferIndex);
+                    if(!isRecording){
+                        Log.d(TAG, "send BUFFER_FLAG_END_OF_STREAM");
+                        mediaCodec.queueInputBuffer(bufferIndex, 0, len, System.nanoTime()/1000, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                        isEOS=true;
+                    }
+
+                    if(bufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER){
+                        //Do nothing. Need to wait till encoder is ready to accept data again.
+                    }
+                    else if(bufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){
+                        //Log.d(TAG,"Output format changed");
+                        audioFormat = mediaCodec.getOutputFormat();
+                    }
+
+                    if (bufferIndex>=0 && !isEOS) {
+                        buf = inputBuffers[bufferIndex];
+                        buf.clear();
+                        len = audioRecord.read(buf,SAMPLES_PER_FRAME);
+                        if (len ==  AudioRecord.ERROR_INVALID_OPERATION || len == AudioRecord.ERROR_BAD_VALUE) {
+                            Log.e(this.getClass().getName(),"An error occurred with the AudioRecord API !");
+                        } else {
+                            //Log.d(TAG,"Pushing raw audio to the decoder: len="+len+" bs: "+inputBuffers[bufferIndex].capacity());
+                            mediaCodec.queueInputBuffer(bufferIndex, 0, len, System.nanoTime()/1000, 0);
+                        }
+                    }
+
+                    //Extract encoded data
+                    ByteBuffer[] outputBuffers = mediaCodec.getOutputBuffers();
+                    INNER_LOOP:             while(true) {
+                        //Log.d(TAG, "Retrieve Encoded Data....");
+                        audioBufferInd = mediaCodec.dequeueOutputBuffer(bufferInfo, TIMEOUT);
+                        //Log.d(TAG, "OUTPUT buffer index = " + audioBufferInd);
+                        if (audioBufferInd >= 0) {
+                            if (bufferInfo.size != 0) {
+                                outputBuffers[audioBufferInd].position(bufferInfo.offset);
+                                bufferInfo.presentationTimeUs=System.nanoTime()/1000;
+                                outputBuffers[audioBufferInd].limit(bufferInfo.offset + bufferInfo.size);
+                                //Log.d(TAG, "Writing data size == " + bufferInfo.size);
+                                count+=bufferInfo.size;
+                                //mediaMuxerHelper.recordMedia(mediaCodec,bufferInfo,true,trackIndex,outputBuffers[audioBufferInd],audioBufferInd);
+                                //mediaMuxer.writeSampleData(trackIndex, outputBuffers[audioBufferInd], bufferInfo);
+                                //mediaCodec.releaseOutputBuffer(audioBufferInd, false);
+                                if(!isEOS) {
+                                    break INNER_LOOP;
+                                }
+                                else{
+                                    break MAIN_LOOP;
+                                }
+                            }
+                        } else if (audioBufferInd == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                            outputBuffers = mediaCodec.getOutputBuffers();
+                        } else if (audioBufferInd == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                            // Subsequent data will conform to new format.
+                            audioFormat = mediaCodec.getOutputFormat();
+                            //trackIndex = mediaMuxer.addTrack(audioFormat);
+                            //mediaMuxer.start();
+                            trackIndex = mediaMuxerHelper.addTrack(audioFormat,true);
+                            isAudioAdded=true;
+                            while(!isVideoAdded){
+                                Thread.sleep(10);
+                                Log.d(TAG,"Audio Sleeping");
+                            }
+                            mediaMuxerHelper.startMuxer();
+                        } else if (audioBufferInd == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                            if (!isEOS) {
+                                break INNER_LOOP;
+                            }
+                            else{
+                                break MAIN_LOOP;
+                            }
+                        }
+                    }
+                }
+                String bytes = "";
+                if (count > 1000000){
+                    bytes = count/1000000+" MB";
+                }
+                else if(count > 1000){
+                    bytes = count/1000+" KB";
+                }
+                else{
+                    bytes = count+" Bytes";
+                }
+                Log.d(TAG,"Written "+bytes+" of data");
+                audioRecord.stop();
+                Log.d(TAG,"Audio Record STOPPED");
+                Log.d(TAG,"Audio saved");
+                isAudioAdded=false;
+            } catch (RuntimeException e) {
+                e.printStackTrace();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } finally {
+                if (audioRecord != null) {
+                    audioRecord.release();
                 }
             }
         }
