@@ -384,16 +384,16 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     protected void onPause() {
         /*if(videoEncoderHandler!=null) {
             videoEncoderHandler.sendEmptyMessage(SHUTDOWN);
+        }*/
+        if(surfaceTexture!=null){
+            surfaceTexture.release();
         }
         Log.d(TAG,"cameraHandler = "+cameraHandler);
         if(cameraHandler!=null) {
             cameraHandler.sendEmptyMessage(SHUTDOWN);
-        }*/
+        }
         closeCamera();
         //stopBackgroundThread();
-        if(surfaceTexture!=null){
-            surfaceTexture.release();
-        }
         //releaseCamera();
         orientationEventListener.disable();
         /*if(videoCodec!=null) {
@@ -514,7 +514,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        Log.d(TAG,"FRAME Available now");
+        if(VERBOSE)Log.d(TAG,"FRAME Available now");
         if(VERBOSE)Log.d(TAG,"is Record = "+isRecord);
         //drawFrame();
         cameraHandler.sendEmptyMessage(FRAME_AVAILABLE);
@@ -665,14 +665,38 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     Log.d(TAG,"Limited support");
                     break;
             }
-            StreamConfigurationMap configs = characteristics.get(
-                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-            imageDimension = configs.getOutputSizes(SurfaceTexture.class)[0];
-            Log.d(TAG,"callback = "+stateCallback+", cam id = "+cameraId);
+            chooseOptimalPreviewSize(cameraCharacteristics);
             manager.openCamera(cameraId+"",stateCallback,null);
             //setCameraLayout();
         } catch (CameraAccessException e) {
             e.printStackTrace();
+        }
+    }
+
+    void chooseOptimalPreviewSize(CameraCharacteristics characteristics)
+    {
+        DisplayMetrics metrics = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(metrics);
+        Log.d(TAG,"Width = "+metrics.widthPixels);
+        Log.d(TAG,"Height = "+metrics.heightPixels);
+        //Aspect ratio needs to be reversed, if orientation is portrait.
+        screenAspectRatio = 1.0f / ((double)metrics.widthPixels/(double)metrics.heightPixels);
+        Log.d(TAG,"SCREEN Aspect Ratio = "+screenAspectRatio);
+        StreamConfigurationMap configs = characteristics.get(
+                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        //imageDimension = configs.getOutputSizes(SurfaceTexture.class)[0];
+        for(int i=0;i < configs.getOutputSizes(SurfaceTexture.class).length;i++)
+        {
+            Size size = configs.getOutputSizes(SurfaceTexture.class)[i];
+            Log.d(TAG,"Config size = "+size);
+            double ar = (double)size.getWidth()/(double)size.getHeight();
+            Log.d(TAG,"Aspect ratio for "+size.getWidth()+" / "+size.getHeight()+" is = "+ar);
+            if(Math.abs(screenAspectRatio - ar) <= 0.2){
+                //Best match for camera preview!!
+                VIDEO_HEIGHT = size.getHeight();
+                VIDEO_WIDTH = size.getWidth();
+                break;
+            }
         }
     }
 
@@ -691,8 +715,8 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             //SurfaceTexture texture = textureView.getSurfaceTexture();
             //assert texture != null;
             //Log.d(TAG,"Preview sessions closed");
-            surfaceTexture.setDefaultBufferSize(imageDimension.getWidth(), imageDimension.getHeight());
-            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            surfaceTexture.setDefaultBufferSize(VIDEO_WIDTH, VIDEO_HEIGHT);
+            captureRequestBuilder = cameraDevice.createCaptureRequest(isRecording ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW);
             Surface videoSurface = new Surface(surfaceTexture);
             captureRequestBuilder.addTarget(videoSurface);
 
@@ -714,6 +738,11 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     //Toast.makeText(TAG, "Configuration change", Toast.LENGTH_SHORT).show();
                 }
                 }, null);
+            if(portrait) {
+                int temp = VIDEO_HEIGHT;
+                VIDEO_HEIGHT = VIDEO_WIDTH;
+                VIDEO_WIDTH = temp;
+            }
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -1184,10 +1213,10 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
         void drawFrame()
         {
-            Log.d(TAG,"mEGLConfig = "+mEGLConfig+", cameraDevice ="+cameraDevice);
+            if(VERBOSE)Log.d(TAG,"mEGLConfig = "+mEGLConfig+", cameraDevice ="+cameraDevice);
             if(mEGLConfig!=null && cameraDevice!= null) {
                 makeCurrent(eglSurface);
-                Log.d(TAG,"made current");
+                if(VERBOSE)Log.d(TAG,"made current");
                 //Get next frame from camera
                 surfaceTexture.updateTexImage();
                 surfaceTexture.getTransformMatrix(mTmpMatrix);
@@ -1208,7 +1237,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 EGL14.eglSwapBuffers(mEGLDisplay, eglSurface);
 
                 if(isRecording) {
-                    Log.d(TAG,"encoderSurface = "+encoderSurface);
+                    if(VERBOSE)Log.d(TAG,"encoderSurface = "+encoderSurface);
                     makeCurrent(encoderSurface);
                     if (VERBOSE) Log.d(TAG, "Made encoder surface current");
                     GLES20.glViewport(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
