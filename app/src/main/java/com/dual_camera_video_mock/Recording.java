@@ -44,6 +44,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ImageButton;
 import android.widget.Toast;
+import android.widget.ZoomControls;
 
 import java.io.File;
 import java.io.IOException;
@@ -182,6 +183,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     SharedPreferences sharedPreferences;
     ImageButton recordButton;
     ImageButton switchButton;
+    ZoomControls zoomControls;
     float rotationAngle = 0.0f;
     boolean backCamera = true;
     volatile boolean isRecord = false;
@@ -309,6 +311,23 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 releaseCamera();
                 setupCamera();
                 showPreview();
+            }
+        });
+        zoomControls = (ZoomControls)findViewById(R.id.zoom_control);
+        zoomControls.setIsZoomInEnabled(true);
+        zoomControls.setIsZoomOutEnabled(true);
+        zoomControls.setOnZoomInClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Log.d(TAG,"Zooming in");
+                zoomInOrOut(true);
+            }
+        });
+        zoomControls.setOnZoomOutClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Log.d(TAG,"Zooming out");
+                zoomInOrOut(false);
             }
         });
         checkAndRecord();
@@ -592,6 +611,29 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         result = (360 - result) % 360;
         Log.d(TAG,"Result == "+result);
         mCamera.setDisplayOrientation(result);
+    }
+
+    public void zoomInOrOut(boolean zoomInOrOut)
+    {
+        Camera.Parameters parameters = mCamera.getParameters();
+        if(parameters.isZoomSupported())
+        {
+            int currentZoom = parameters.getZoom();
+            int MAX_ZOOM = parameters.getMaxZoom();
+            if(zoomInOrOut && (currentZoom < MAX_ZOOM && currentZoom >= 0)){ //Zoom in
+                parameters.setZoom(++currentZoom);
+                Log.d(TAG,"New zoom in set to ="+currentZoom);
+            }
+            else if(!zoomInOrOut && (currentZoom <= MAX_ZOOM && currentZoom > 0)){ //Zoom out
+                parameters.setZoom(--currentZoom);
+                Log.d(TAG,"New zoom out set to ="+currentZoom);
+            }
+            mCamera.setParameters(parameters);
+        }
+        else
+        {
+            Toast.makeText(getApplicationContext(),"Zoom not supported",Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showPreview()

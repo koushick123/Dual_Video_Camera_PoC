@@ -22,6 +22,15 @@
         android:scaleType="fitXY"
         android:src="@android:drawable/ic_menu_camera" />
 
+    <ZoomControls
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/zoom_control"
+        android:scaleType="fitXY"
+        android:layout_below="@+id/switchCam"
+        >
+    </ZoomControls>
+
     <ImageButton
         android:layout_width="64dp"
         android:layout_height="64dp"
