@@ -46,12 +46,13 @@ public class AspectFrameLayout extends FrameLayout {
         if (mTargetAspect > 0) {
             int initialWidth = MeasureSpec.getSize(widthMeasureSpec);
             int initialHeight = MeasureSpec.getSize(heightMeasureSpec);
+            Log.d(TAG,"Iniital AR = "+initialWidth+" X "+initialHeight);
 
-            // factor the padding out
+            /*// factor the padding out
             int horizPadding = getPaddingLeft() + getPaddingRight();
             int vertPadding = getPaddingTop() + getPaddingBottom();
             initialWidth -= horizPadding;
-            initialHeight -= vertPadding;
+            initialHeight -= vertPadding;*/
 
             double viewAspectRatio = (double) initialWidth / initialHeight;
             double aspectDiff = mTargetAspect / viewAspectRatio - 1;
@@ -70,10 +71,9 @@ public class AspectFrameLayout extends FrameLayout {
                     // limited by short height; restrict width
                     initialWidth = (int) (initialHeight * mTargetAspect);
                 }
-                Log.d(TAG, "new size=" + initialWidth + "x" + initialHeight + " + padding " +
-                        horizPadding + "x" + vertPadding);
-                initialWidth += horizPadding;
-                initialHeight += vertPadding;
+                Log.d(TAG, "new size=" + initialWidth + "x" + initialHeight);
+                /*initialWidth += horizPadding;
+                initialHeight += vertPadding;*/
                 widthMeasureSpec = MeasureSpec.makeMeasureSpec(initialWidth, MeasureSpec.EXACTLY);
                 heightMeasureSpec = MeasureSpec.makeMeasureSpec(initialHeight, MeasureSpec.EXACTLY);
             }

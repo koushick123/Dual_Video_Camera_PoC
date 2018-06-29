@@ -3,6 +3,7 @@ package com.dual_camera_video_mock;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -206,6 +207,11 @@ public class MainActivity extends AppCompatActivity {
         closePreviewSessions();
         try {
             setUpMediaRecorder();
+            if(!BACK_CAMERA) {
+                Matrix matrix = new Matrix();
+                matrix.postRotate(180);
+                textureView.setTransform(matrix);
+            }
             SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
             assert surfaceTexture!=null;
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);

@@ -1,6 +1,7 @@
 package com.dual_camera_video_mock;
 
 import android.Manifest;
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -33,6 +34,7 @@ import android.opengl.EGLSurface;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.Matrix;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -211,6 +213,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
     private Handler mBackgroundHandler;
     private HandlerThread mBackgroundThread;
     boolean isRecording = false;
+    boolean switchCam = false;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -330,6 +333,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 editor.putBoolean("backCamera",backCamera);
                 editor.commit();
                 //releaseCamera();
+                switchCam = true;
                 setupCamera2();
                 //showPreview();
                 //createCameraPreview();
@@ -489,15 +493,20 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
             Log.d(TAG, "Start Video encoder after EGL is setup");
         }*/
         //showPreview();
-        createCameraPreview();
         surfaceTexture.setOnFrameAvailableListener(this);
         /*if(isRecording){
             setupMediaRecorder();
         }*/
         //When recreate() is called, this is called again and recording needs to begin.
-        if(isRecord){
+        /*if(isRecord){
             Log.d(TAG,"send record start");
             cameraHandler.sendEmptyMessage(RECORD_START);
+        }
+        else{
+            createCameraPreview();
+        }*/
+        if(!isRecord){
+            createCameraPreview();
         }
     }
 
@@ -553,10 +562,12 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                 }
             }
         }
+        @TargetApi(Build.VERSION_CODES.LOLLIPOP)
         @Override
         public void onDisconnected(CameraDevice camera) {
             cameraDevice.close();
         }
+        @TargetApi(Build.VERSION_CODES.LOLLIPOP)
         @Override
         public void onError(CameraDevice camera, int error) {
             Log.d(TAG,"Error encountered");
@@ -565,6 +576,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
     };
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private void startRecordingVideo() {
         closePreviewSessions();
         try {
@@ -618,6 +630,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
 
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private void setupCamera2()
     {
         CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
@@ -628,6 +641,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         else{
             backCamera = true;
         }
+        Log.d(TAG, "backCamera = "+backCamera);
         try {
             for (String camId : manager.getCameraIdList()) {
                 cameraCharacteristics = manager.getCameraCharacteristics(camId);
@@ -651,6 +665,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                         Manifest.permission.WRITE_EXTERNAL_STORAGE}, MY_PERMISSIONS_REQUEST_CAMERA);
                 return;
             }
+            Log.d(TAG, "CameraId = "+cameraId);
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId+"");
             int level=characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
             switch(level)
@@ -665,14 +680,18 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
                     Log.d(TAG,"Limited support");
                     break;
             }
-            chooseOptimalPreviewSize(cameraCharacteristics);
+//            chooseOptimalPreviewSize(cameraCharacteristics);
+            VIDEO_WIDTH = 720;
+            VIDEO_HEIGHT = 1280;
             manager.openCamera(cameraId+"",stateCallback,null);
+            Log.d(TAG, "openCamera CALLED");
             //setCameraLayout();
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     void chooseOptimalPreviewSize(CameraCharacteristics characteristics)
     {
         DisplayMetrics metrics = new DisplayMetrics();
@@ -700,6 +719,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private void closeCamera() {
         closePreviewSessions();
 
@@ -709,6 +729,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     protected void createCameraPreview() {
         try {
             closePreviewSessions();
@@ -748,6 +769,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     protected void updatePreview() {
         if(null == cameraDevice) {
             Log.e(TAG, "updatePreview error, return");
@@ -761,8 +783,14 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+        if(isRecord && !switchCam){
+            switchCam = false;
+            Log.d(TAG,"send record start");
+            cameraHandler.sendEmptyMessage(RECORD_START);
+        }
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private void closePreviewSessions()
     {
         if(cameraCaptureSessions!=null) {
@@ -1180,6 +1208,7 @@ public class Recording extends AppCompatActivity implements SurfaceHolder.Callba
         }
 
         String mNextVideoAbsolutePath = null;
+        @TargetApi(Build.VERSION_CODES.LOLLIPOP)
         public void setupMediaRecorder()
         {
             camcorderProfile = CamcorderProfile.get(cameraId,CamcorderProfile.QUALITY_HIGH);
